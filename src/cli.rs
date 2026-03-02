@@ -96,6 +96,10 @@ pub struct RemoveArgs {
 pub struct StatusArgs {
     /// Workspace name (defaults to current directory if it is a workspace)
     pub name: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Args, Debug)]

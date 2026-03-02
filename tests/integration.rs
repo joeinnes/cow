@@ -764,6 +764,61 @@ mod tests {
             .stderr(predicate::str::contains("not found"));
     }
 
+    #[test]
+    fn status_json_clean_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "json-status-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let raw = env.cow()
+            .args(["status", "json-status-ws", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let v: serde_json::Value = serde_json::from_slice(&raw).expect("should be valid JSON");
+        assert_eq!(v["name"], "json-status-ws");
+        assert_eq!(v["vcs"], "git");
+        assert_eq!(v["dirty"], false);
+        assert!(v["branch"].as_str().is_some());
+        assert!(v["path"].as_str().is_some());
+        assert!(v["source"].as_str().is_some());
+        assert!(v["created_at"].as_str().is_some());
+    }
+
+    #[test]
+    fn status_json_dirty_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "json-dirty-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/json-dirty-ws");
+        std::fs::write(workspace.join("wip.txt"), "work in progress").unwrap();
+
+        let raw = env.cow()
+            .args(["status", "json-dirty-ws", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let v: serde_json::Value = serde_json::from_slice(&raw).expect("should be valid JSON");
+        assert_eq!(v["dirty"], true);
+        let files = v["modified_files"].as_array().expect("modified_files should be array");
+        assert!(files.iter().any(|f| f.as_str().unwrap_or("").contains("wip.txt")));
+    }
+
     // ─── diff ──────────────────────────────────────────────────────────────────
 
     #[test]
