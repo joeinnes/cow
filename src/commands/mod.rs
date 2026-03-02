@@ -1,3 +1,4 @@
+mod cd;
 mod create;
 mod diff;
 mod extract;
@@ -12,6 +13,7 @@ use crate::cli::{Cli, Commands};
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
+        Commands::Cd(args) => cd::run(args),
         Commands::Create(args) => create::run(args),
         Commands::List(args) => list::run(args),
         Commands::Remove(args) => remove::run(args),
