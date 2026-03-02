@@ -19,7 +19,26 @@ pub fn run(args: ListArgs) -> Result<()> {
     }
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&workspaces)?);
+        let out: Vec<serde_json::Value> = workspaces.iter().map(|w| {
+            let current_branch = match w.vcs {
+                Vcs::Git => vcs::git_current_branch(&w.path)
+                    .unwrap_or_else(|| w.branch.clone().unwrap_or_else(|| "-".to_string())),
+                // tarpaulin-ignore-start
+                Vcs::Jj => w.branch.clone().unwrap_or_else(|| "-".to_string()),
+                // tarpaulin-ignore-end
+            };
+            let dirty = match w.vcs {
+                Vcs::Git => vcs::git_is_dirty(&w.path),
+                // tarpaulin-ignore-start
+                Vcs::Jj => vcs::jj_is_dirty(&w.path),
+                // tarpaulin-ignore-end
+            };
+            let mut v = serde_json::to_value(w).unwrap();
+            v["dirty"] = serde_json::json!(dirty);
+            v["current_branch"] = serde_json::json!(current_branch);
+            v
+        }).collect();
+        println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
 
