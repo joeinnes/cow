@@ -874,32 +874,37 @@ mod tests {
     }
 
     #[test]
-    fn extract_branch_pushes() {
+    fn extract_branch_creates_local_branch() {
+        // --branch should create the named branch in the SOURCE repo, not push to origin.
         let env = Env::new();
         let source = make_git_repo();
 
         env.cow()
-            .args(["create", "push-ws", "--source", source.path().to_str().unwrap()])
+            .args(["create", "branch-ws", "--source", source.path().to_str().unwrap()])
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/push-ws");
+        let workspace = env.home.join(".cow/workspaces/branch-ws");
 
-        // Create a bare repo as a local "origin" remote
-        let remote_dir = TempDir::new().unwrap();
-        std::process::Command::new("git")
-            .args(["init", "--bare"])
-            .current_dir(remote_dir.path())
-            .status()
-            .unwrap();
-
-        git(&workspace, &["remote", "add", "origin", remote_dir.path().to_str().unwrap()]);
+        // Commit something in the workspace so branch-ws diverges from source.
+        std::fs::write(workspace.join("feature.txt"), "feature").unwrap();
+        git(&workspace, &["add", "feature.txt"]);
+        git(&workspace, &["commit", "-m", "add feature"]);
 
         env.cow()
-            .args(["extract", "push-ws", "--branch", "feat/extracted"])
+            .args(["extract", "branch-ws", "--branch", "feat/extracted"])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Pushed to origin/feat/extracted"));
+            .stdout(predicate::str::contains("Branch 'feat/extracted' created in source repo"));
+
+        // Verify the branch now exists in the source repo.
+        let branch_exists = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "feat/extracted"])
+            .current_dir(source.path())
+            .status()
+            .unwrap()
+            .success();
+        assert!(branch_exists, "feat/extracted should exist in source repo");
     }
 
     // ─── mcp ───────────────────────────────────────────────────────────────────
@@ -2084,21 +2089,38 @@ mod tests {
     }
 
     #[test]
-    fn extract_branch_fails_when_no_remote() {
+    fn extract_branch_fails_when_fetch_errors() {
         let env = Env::new();
         let source = make_git_repo();
 
         env.cow()
-            .args(["create", "no-remote-ws", "--source", source.path().to_str().unwrap()])
+            .args(["create", "fetch-fail-ws", "--source", source.path().to_str().unwrap()])
             .assert()
             .success();
 
-        // No "origin" remote is configured → git push exits non-zero → bail.
+        // Stub git so that `git fetch` exits non-zero.
+        let stub_dir = TempDir::new().expect("stub dir");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "/usr/bin/git".to_string());
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"fetch\" ]; then exit 1; fi\nexec {real_git} \"$@\"\n"
+            );
+            let stub_path = stub_dir.path().join("git");
+            std::fs::write(&stub_path, &script).unwrap();
+            std::fs::set_permissions(&stub_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
         env.cow()
-            .args(["extract", "no-remote-ws", "--branch", "feature-branch"])
+            .args(["extract", "fetch-fail-ws", "--branch", "feature-branch"])
+            .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
-            .stderr(predicate::str::contains("Failed to push to branch"));
+            .stderr(predicate::str::contains("Failed to create branch"));
     }
 
     #[test]
