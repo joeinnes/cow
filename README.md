@@ -1,8 +1,8 @@
-# sparse-worktree (`swt`)
+# cow
 
-Copy-on-write workspace manager for parallel development.
+Copy-on-write workspace manager for parallel development on macOS.
 
-Uses macOS APFS `clonefile` (via `cp -rc`) to create instant, near-zero-cost copies of a repository. Each workspace looks and behaves like a full repo but only consumes disk for files that are actually modified.
+Uses APFS `clonefile` (via `cp -rc`) to create instant, near-zero-cost copies of a repository. Each workspace looks and behaves like a full repo but only consumes disk for files that are actually modified.
 
 ## Why
 
@@ -17,45 +17,47 @@ On APFS (the default on every modern Mac), `cp -rc` creates an instant block-lev
 ## Install
 
 ```sh
-brew install joeinn.es/tap/sparse-worktree
+brew install joeinn.es/tap/cow
 ```
 
 Or build from source:
 
 ```sh
-cargo install --path .
+cargo install cow-cli
 ```
 
 ## Quick start
 
 ```sh
 # Inside a git repo
-swt create my-feature          # clone current repo to ~/.swt/workspaces/my-feature
-swt create                     # auto-name: agent-1, agent-2, ...
+cow create feature-x        # clone repo to ~/.cow/workspaces/feature-x, branch feature-x
+cow create                  # auto-name: agent-1, agent-2, ...
 
 # Point an agent at the workspace
-claude --workspace ~/.swt/workspaces/agent-1
+CLAUDE_WORKSPACE=~/.cow/workspaces/feature-x claude
 
 # Review and clean up
-swt list
-swt remove agent-1
+cow list
+cow status feature-x
+cow remove feature-x
 ```
 
 ## Commands
 
-### `swt create [OPTIONS] [NAME]`
+### `cow create [OPTIONS] [NAME]`
 
-Create a new workspace from a repository using APFS CoW.
+Create a new workspace from a repository using APFS CoW. When a name is given it is also used as the branch name (created if it does not exist).
 
 | Option | Description |
 |--------|-------------|
 | `--source <PATH>` | Source repo (default: current directory) |
-| `--branch <BRANCH>` | Git branch to check out (created if it does not exist) |
-| `--change <CHANGE>` | jj change to edit |
-| `--dir <PATH>` | Parent directory for workspaces (default: `~/.swt/workspaces/`) |
+| `--branch <BRANCH>` | Override the branch name (default: workspace name) |
+| `--no-branch` | Do not switch or create a branch |
+| `--change <CHANGE>` | jj change to edit in the new workspace |
+| `--dir <PATH>` | Parent directory for workspaces (default: `~/.cow/workspaces/`) |
 | `--no-clean` | Skip post-clone cleanup of runtime artefacts |
 
-### `swt list [OPTIONS]`
+### `cow list [OPTIONS]`
 
 List all active workspaces.
 
@@ -64,9 +66,26 @@ List all active workspaces.
 | `--source <PATH>` | Filter to workspaces from this source |
 | `--json` | Machine-readable JSON output |
 
-### `swt remove [OPTIONS] <NAME...>`
+### `cow status [NAME]`
 
-Remove one or more workspaces. Warns before removing workspaces with uncommitted changes.
+Detailed status of a workspace. Defaults to the current directory if it is a workspace.
+
+### `cow diff [NAME]`
+
+Show changes in a workspace relative to its last commit. Passthrough to `git diff` / `jj diff`.
+
+### `cow extract [OPTIONS] <NAME>`
+
+Extract changes from a workspace back into the source repository.
+
+| Option | Description |
+|--------|-------------|
+| `--patch <FILE>` | Write a patch file |
+| `--branch <NAME>` | Create this branch in the source repo at workspace HEAD |
+
+### `cow remove [OPTIONS] <NAME...>`
+
+Remove one or more workspaces. Warns before removing workspaces with uncommitted changes, and offers to push unpushed commits first.
 
 | Option | Description |
 |--------|-------------|
@@ -74,34 +93,70 @@ Remove one or more workspaces. Warns before removing workspaces with uncommitted
 | `--all` | Remove all workspaces |
 | `--source <PATH>` | Scope `--all` to this source |
 
-### `swt status [NAME]`
+### `cow sync [SOURCE_BRANCH]`
 
-Detailed status of a workspace. Defaults to the current directory if it is a workspace.
-
-### `swt diff [NAME]`
-
-Show changes in a workspace relative to its last commit. Passthrough to `git diff` / `jj diff`.
-
-### `swt extract [OPTIONS] <NAME>`
-
-Extract changes from a workspace.
+Fetch the latest commits from the source repository and rebase the workspace onto them. Defaults to syncing with the workspace's own branch; pass a branch name to sync with a different one (e.g. `cow sync main`).
 
 | Option | Description |
 |--------|-------------|
-| `--patch <FILE>` | Write a patch file |
-| `--branch <NAME>` | Push to this branch name on origin |
+| `--merge` | Merge instead of rebase |
+| `--name <NAME>` | Target a named workspace instead of detecting from cwd |
+
+### `cow mcp`
+
+Run as a [Model Context Protocol](https://modelcontextprotocol.io) stdio server. Exposes `cow_create`, `cow_list`, `cow_remove`, `cow_status`, and `cow_diff` as MCP tools so agents can manage workspaces without human intervention.
+
+Add to your MCP config (`~/.claude.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "cow": {
+      "command": "cow",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+## Feature branch workflow
+
+The intended lifecycle for an agent working on a feature branch:
+
+```sh
+# 1. Create workspace — also creates the feature branch
+cow create feature-x --source ~/repos/myapp
+
+# 2. Point your agent at the workspace
+#    The agent commits to feature-x inside the workspace.
+
+# 3. While the agent works, main moves on. Bring the workspace up to date:
+cow sync main              # rebase workspace onto latest main from source
+
+# 4. When the agent is done, land the branch in your source repo for review:
+cow extract feature-x --branch feature-x
+#    feature-x now exists locally in ~/repos/myapp — review, then push normally.
+
+# 5. Push and open a PR from your source repo as usual:
+cd ~/repos/myapp && git push origin feature-x
+
+# 6. Remove the workspace (cow will offer to push if there are unpushed commits):
+cow remove feature-x
+```
+
+`cow sync` fetches from the source repo (no network — it is a local path) and rebases the workspace. `cow extract --branch` also does a local fetch in reverse: it lands the workspace's branch in the source repo without touching any remote.
 
 ## How it works
 
 On APFS, `clonefile(2)` creates a copy-on-write clone of a file in constant time. The clone shares all disk blocks with the original until either copy is modified, at which point APFS transparently copies only the modified block (not the whole file).
 
-`swt create` runs `cp -rc <source> <dest>`, which uses `clonefile` for each file. The result is a full copy of the repository — including `node_modules`, build outputs, caches, and `.env` files — with near-zero disk overhead and instant creation time.
+`cow create` runs `cp -rc <source> <dest>`, which uses `clonefile` for each file. The result is a full copy of the repository — including `node_modules`, build outputs, caches, and `.env` files — with near-zero disk overhead and instant creation time.
 
 ## Post-clone cleanup
 
-Some runtime artefacts should not carry over (pid files, socket files, stale lock files). The `create` command strips these by default (`--no-clean` to skip).
+Some runtime artefacts should not carry over (pid files, socket files). The `create` command strips these by default (`--no-clean` to skip).
 
-Add a `.swt.json` to your repo to define project-specific cleanup:
+Add a `.cow.json` to your repo to define project-specific cleanup:
 
 ```json
 {
@@ -114,23 +169,17 @@ Add a `.swt.json` to your repo to define project-specific cleanup:
 
 ## Comparison
 
-| | swt | git worktree | full clone |
-|-|-----|-------------|------------|
+| | cow 🐄 | git worktree | full clone |
+|-|--------|-------------|------------|
 | Creation time | Instant | Seconds–minutes | Minutes |
 | Disk overhead | ~0 (CoW) | Full working tree | Full repo |
-| node_modules ready | Yes | No | No |
+| `node_modules` ready | Yes | No | No |
+| `.env` / build cache | Yes | No | No |
 | macOS only | Yes | No | No |
-| APFS required | Yes | No | No |
 
 ## Limitations
 
 - macOS and APFS only (v1). Linux support via OverlayFS is a future consideration.
 - Git submodules are not tested and may not work correctly.
 - The source must be a primary git repo, not a git worktree.
-
-## Homebrew tap
-
-```ruby
-brew tap joeinn.es/tap
-brew install sparse-worktree
-```
+- `cow sync` and `cow extract --branch` are not yet supported for jj workspaces.
