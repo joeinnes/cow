@@ -281,7 +281,7 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
         // Linux: attempt copy-on-write via cp --reflink=always (btrfs, xfs).
         // Fall back to a regular copy with a warning if the filesystem does not support it.
         let reflink_status = Command::new("cp")
-            .args(["--reflink=always", "-r", source.to_str().unwrap(), dest.to_str().unwrap()])
+            .args(["--reflink=always", "-R", source.to_str().unwrap(), dest.to_str().unwrap()])
             .status();
 
         match reflink_status {
@@ -295,12 +295,12 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
                 let _ = std::fs::remove_dir_all(dest);
 
                 let status = Command::new("cp")
-                    .args(["-r", source.to_str().unwrap(), dest.to_str().unwrap()])
+                    .args(["-R", source.to_str().unwrap(), dest.to_str().unwrap()])
                     .status()
                     .context("Failed to run cp")?;
                 if !status.success() {
                     bail!(
-                        "cp -r failed when cloning '{}' to '{}'.",
+                        "cp -R failed when cloning '{}' to '{}'.",
                         source.display(),
                         dest.display()
                     );
