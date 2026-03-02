@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use colored::Colorize;
 use dialoguer::Confirm;
+use std::path::Path;
 
 use crate::{cli::RemoveArgs, state::State, vcs::{self, Vcs}};
 
@@ -91,6 +92,25 @@ pub fn run(args: RemoveArgs) -> Result<()> {
         };
 
         if confirmed {
+            // For git workspaces, warn about unpushed commits and optionally
+            // offer to push before the workspace is deleted.
+            if entry.vcs == Vcs::Git && vcs::git_has_unpushed_commits(&entry.path) {
+                if args.force {
+                    eprintln!(
+                        "Warning: workspace '{}' has unpushed commits that will be lost.",
+                        name
+                    );
+                } else {
+                    let pushed = offer_push(name, &entry.path)?;
+                    if !pushed {
+                        eprintln!(
+                            "Warning: workspace '{}' has unpushed commits that will be lost.",
+                            name
+                        );
+                    }
+                }
+            }
+
             std::fs::remove_dir_all(&entry.path)?;
             state.remove(name);
             println!("Removed workspace '{}'", name);
@@ -105,6 +125,36 @@ pub fn run(args: RemoveArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// On TTY: prompt the user to push, attempt the push if they say yes.
+/// On non-TTY: returns false immediately (caller will print the warning).
+fn offer_push(name: &str, path: &Path) -> Result<bool> {
+    let prompt = format!(
+        "Workspace '{}' has unpushed commits. Push to origin before removing?",
+        name
+    );
+    match Confirm::new().with_prompt(&prompt).default(false).interact_opt() {
+        Ok(Some(true)) => {
+            let branch = vcs::git_current_branch(path).unwrap_or_default();
+            let status = std::process::Command::new("git")
+                .args(["push", "--set-upstream", "origin", &branch])
+                .current_dir(path)
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    println!("Pushed '{}' to origin/{branch}.", name);
+                    Ok(true)
+                }
+                _ => {
+                    eprintln!("Warning: push failed. Proceeding with removal.");
+                    Ok(false)
+                }
+            }
+        }
+        // Non-TTY (Err) or user declined: caller handles warning.
+        Ok(None) | Ok(Some(false)) | Err(_) => Ok(false),
+    }
 }
 
 /// Show a yes/no prompt. Returns false if stdin is not a TTY.

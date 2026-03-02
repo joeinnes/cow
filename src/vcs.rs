@@ -87,6 +87,19 @@ pub fn jj_is_dirty(path: &Path) -> bool {
 }
 // tarpaulin-ignore-end
 
+/// Returns true if the current branch has commits not yet pushed to its upstream.
+/// Returns false when no upstream is configured or the command fails.
+pub fn git_has_unpushed_commits(path: &Path) -> bool {
+    let output = Command::new("git")
+        .args(["log", "@{upstream}..HEAD", "--oneline"])
+        .current_dir(path)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => !String::from_utf8_lossy(&o.stdout).trim().is_empty(),
+        _ => false,
+    }
+}
+
 /// Returns the full HEAD commit SHA, or None if unavailable.
 pub fn git_head_sha(path: &Path) -> Option<String> {
     let output = Command::new("git")
