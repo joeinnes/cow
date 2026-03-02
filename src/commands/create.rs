@@ -138,10 +138,45 @@ pub fn run(args: CreateArgs) -> Result<()> {
         initial_commit,
         created_at: chrono::Utc::now(),
     };
-    state.add(entry);
+    state.add(entry.clone());
     state.save()?;
 
+    write_context_file(&entry)?;
+
     println!("Created workspace '{}' at {}", name, dest.display());
+    Ok(())
+}
+
+/// Write a `.cow-context` file into the workspace root so agents can orient
+/// themselves without shelling out to `cow status`. Also excludes the file
+/// from git via `.git/info/exclude` so it does not appear as an untracked file.
+fn write_context_file(entry: &WorkspaceEntry) -> Result<()> {
+    let ctx = serde_json::json!({
+        "name": entry.name,
+        "source": entry.source.to_string_lossy(),
+        "branch": entry.branch,
+        "vcs": entry.vcs.to_string(),
+        "initial_commit": entry.initial_commit,
+        "created_at": entry.created_at.to_rfc3339(),
+    });
+    let ctx_path = entry.path.join(".cow-context");
+    std::fs::write(&ctx_path, serde_json::to_string_pretty(&ctx)?)
+        .with_context(|| format!("Failed to write .cow-context to {}", ctx_path.display()))?;
+
+    // Exclude from git tracking so it never shows as untracked.
+    let exclude_path = entry.path.join(".git").join("info").join("exclude");
+    if let Ok(existing) = std::fs::read_to_string(&exclude_path) {
+        if !existing.contains(".cow-context") {
+            let mut content = existing;
+            if !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(".cow-context\n");
+            std::fs::write(&exclude_path, content)
+                .with_context(|| format!("Failed to update {}", exclude_path.display()))?;
+        }
+    }
+
     Ok(())
 }
 

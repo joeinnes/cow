@@ -439,6 +439,52 @@ mod tests {
         assert!(env.home.join(".cow/workspaces/run-ws/post_clone_ran.txt").exists());
     }
 
+    // ─── .cow-context ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn create_writes_cow_context_file() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "ctx-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ctx_path = env.home.join(".cow/workspaces/ctx-ws/.cow-context");
+        assert!(ctx_path.exists(), ".cow-context should be written into workspace root");
+
+        let content = std::fs::read_to_string(&ctx_path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&content).expect("should be valid JSON");
+
+        assert_eq!(v["name"], "ctx-ws");
+        assert_eq!(v["vcs"], "git");
+        assert!(v["source"].as_str().is_some());
+        assert!(v["branch"].as_str().is_some());
+        assert!(v["initial_commit"].as_str().is_some());
+        assert!(v["created_at"].as_str().is_some());
+    }
+
+    #[test]
+    fn cow_context_excluded_from_git_status() {
+        // .cow-context should not show up as an untracked file in git status.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "ctx-clean-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/ctx-clean-ws");
+        let output = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&workspace)
+            .output()
+            .unwrap();
+        assert!(output.stdout.is_empty(), ".cow-context should not make workspace dirty");
+    }
+
     // ─── list ──────────────────────────────────────────────────────────────────
 
     #[test]
