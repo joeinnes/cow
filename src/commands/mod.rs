@@ -2,6 +2,7 @@ mod create;
 mod diff;
 mod extract;
 mod list;
+mod mcp;
 mod remove;
 mod status;
 
@@ -16,5 +17,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Status(args) => status::run(args),
         Commands::Diff(args) => diff::run(args),
         Commands::Extract(args) => extract::run(args),
+        Commands::Mcp => mcp::run(),
     }
 }

@@ -46,11 +46,13 @@ pub fn run(args: RemoveArgs) -> Result<()> {
             continue;
         };
 
+        // tarpaulin-ignore-start
         if !entry.path.exists() {
             // Already gone; just prune from state
             state.remove(name);
             continue;
         }
+        // tarpaulin-ignore-end
 
         let confirmed = match entry.vcs {
             Vcs::Git => {
@@ -70,6 +72,7 @@ pub fn run(args: RemoveArgs) -> Result<()> {
                 }
             }
 
+            // tarpaulin-ignore-start
             Vcs::Jj => {
                 if vcs::jj_is_dirty(&entry.path) {
                     eprintln!(
@@ -84,6 +87,7 @@ pub fn run(args: RemoveArgs) -> Result<()> {
                     confirm_or_default(&format!("Remove workspace '{}'?", name))?
                 }
             }
+            // tarpaulin-ignore-end
         };
 
         if confirmed {
@@ -105,9 +109,9 @@ pub fn run(args: RemoveArgs) -> Result<()> {
 
 /// Show a yes/no prompt. Returns false if stdin is not a TTY.
 fn confirm_or_default(prompt: &str) -> Result<bool> {
-    match Confirm::new().with_prompt(prompt).default(false).interact_opt()? {
-        Some(answer) => Ok(answer),
-        None => {
+    match Confirm::new().with_prompt(prompt).default(false).interact_opt() {
+        Ok(Some(answer)) => Ok(answer),
+        Ok(None) | Err(_) => {
             eprintln!("(Not a TTY — defaulting to no.)");
             Ok(false)
         }

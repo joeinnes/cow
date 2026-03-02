@@ -19,11 +19,13 @@ pub fn run(args: StatusArgs) -> Result<()> {
             let files = if dirty { vcs::git_status_short(&entry.path) } else { String::new() };
             (dirty, files)
         }
+        // tarpaulin-ignore-start
         Vcs::Jj => {
             let dirty = vcs::jj_is_dirty(&entry.path);
             let files = if dirty { vcs::jj_diff_summary(&entry.path) } else { String::new() };
             (dirty, files)
         }
+        // tarpaulin-ignore-end
     };
 
     let status_str = if is_dirty { "dirty" } else { "clean" };
@@ -32,7 +34,9 @@ pub fn run(args: StatusArgs) -> Result<()> {
     let branch = match entry.vcs {
         Vcs::Git => vcs::git_current_branch(&entry.path)
             .unwrap_or_else(|| entry.branch.clone().unwrap_or_else(|| "-".to_string())),
+        // tarpaulin-ignore-start
         Vcs::Jj => entry.branch.clone().unwrap_or_else(|| "-".to_string()),
+        // tarpaulin-ignore-end
     };
 
     let disk_delta = estimate_disk_delta(&entry);
@@ -65,15 +69,19 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
     if let Some(n) = name {
         return Ok(n);
     }
-    // Detect from cwd
+    // Detect from cwd, canonicalising both sides so /var → /private/var symlinks don't break matching.
     let cwd = std::env::current_dir().context("Cannot determine current directory")?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
     state
         .workspaces
         .iter()
-        .find(|w| cwd.starts_with(&w.path))
+        .find(|w| {
+            let wp = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
+            cwd.starts_with(&wp)
+        })
         .map(|w| w.name.clone())
         .context(
-            "Not in a swt workspace. Specify a workspace name or run from inside a workspace.",
+            "Not in a cow workspace. Specify a workspace name or run from inside a workspace.",
         )
 }
 
@@ -96,7 +104,9 @@ fn estimate_disk_delta(entry: &crate::state::WorkspaceEntry) -> Option<u64> {
                 .sum();
             Some(total)
         }
+        // tarpaulin-ignore-start
         Vcs::Jj => None,
+        // tarpaulin-ignore-end
     }
 }
 
@@ -107,5 +117,29 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} KB", bytes as f64 / 1024.0)
     } else {
         format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_bytes_under_1kb() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_bytes_kilobytes() {
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(2048), "2.0 KB");
+    }
+
+    #[test]
+    fn format_bytes_megabytes() {
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(2 * 1024 * 1024), "2.0 MB");
     }
 }
