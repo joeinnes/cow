@@ -26,6 +26,8 @@ pub enum Commands {
     Diff(DiffArgs),
     /// Extract changes from a workspace as a patch or branch
     Extract(ExtractArgs),
+    /// Sync a workspace with its source repository
+    Sync(SyncArgs),
     /// Run as a Model Context Protocol (MCP) stdio server
     Mcp,
 }
@@ -100,6 +102,20 @@ pub struct StatusArgs {
 pub struct DiffArgs {
     /// Workspace name (defaults to current directory if it is a workspace)
     pub name: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct SyncArgs {
+    /// Branch in the source repo to sync from (defaults to workspace's current branch)
+    pub source_branch: Option<String>,
+
+    /// Workspace name (defaults to current directory)
+    #[arg(long, short = 'n')]
+    pub name: Option<String>,
+
+    /// Merge instead of rebase
+    #[arg(long)]
+    pub merge: bool,
 }
 
 #[derive(clap::Args, Debug)]

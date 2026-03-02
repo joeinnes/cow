@@ -907,6 +907,110 @@ mod tests {
         assert!(branch_exists, "feat/extracted should exist in source repo");
     }
 
+    // ─── sync ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sync_rebases_workspace_onto_source_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "sync-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/sync-ws");
+
+        // Add a commit to source's main after workspace was created.
+        std::fs::write(source.path().join("synced.txt"), "from source").unwrap();
+        git(source.path(), &["add", "synced.txt"]);
+        git(source.path(), &["commit", "-m", "source update"]);
+
+        env.cow()
+            .args(["sync", "main", "--name", "sync-ws"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Synced 'sync-ws'"));
+
+        // The file from source should now be in the workspace.
+        assert!(workspace.join("synced.txt").exists(), "synced.txt should exist after sync");
+    }
+
+    #[test]
+    fn sync_merges_with_flag() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "merge-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/merge-ws");
+
+        std::fs::write(source.path().join("merged.txt"), "from source").unwrap();
+        git(source.path(), &["add", "merged.txt"]);
+        git(source.path(), &["commit", "-m", "source merge update"]);
+
+        env.cow()
+            .args(["sync", "main", "--name", "merge-ws", "--merge"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Synced 'merge-ws'"));
+
+        assert!(workspace.join("merged.txt").exists());
+    }
+
+    #[test]
+    fn sync_refuses_when_dirty() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "dirty-sync-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/dirty-sync-ws");
+
+        // Leave an uncommitted file in the workspace.
+        std::fs::write(workspace.join("uncommitted.txt"), "wip").unwrap();
+
+        env.cow()
+            .args(["sync", "main", "--name", "dirty-sync-ws"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("uncommitted changes"));
+    }
+
+    #[test]
+    fn sync_workspace_not_found() {
+        let env = Env::new();
+
+        env.cow()
+            .args(["sync", "main", "--name", "no-such-ws"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not found"));
+    }
+
+    #[test]
+    fn sync_jj_not_supported() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-sync-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["sync", "main", "--name", "jj-sync-ws"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not yet supported for jj"));
+    }
+
     // ─── mcp ───────────────────────────────────────────────────────────────────
 
     #[test]

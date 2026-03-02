@@ -5,6 +5,7 @@ mod list;
 mod mcp;
 mod remove;
 mod status;
+mod sync;
 
 use anyhow::Result;
 use crate::cli::{Cli, Commands};
@@ -17,6 +18,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Status(args) => status::run(args),
         Commands::Diff(args) => diff::run(args),
         Commands::Extract(args) => extract::run(args),
+        Commands::Sync(args) => sync::run(args),
         Commands::Mcp => mcp::run(),
     }
 }
