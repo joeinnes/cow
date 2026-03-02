@@ -1244,6 +1244,41 @@ mod tests {
             .stderr(predicate::str::contains("Failed to rebase workspace"));
     }
 
+    #[test]
+    fn sync_conflict_aborts_and_reports() {
+        // Real rebase conflict: workspace and source both modify the same line.
+        // cow sync should auto-abort, leave workspace clean, and report the conflict.
+        let env = Env::new();
+        let source = make_git_repo(); // has hello.txt with content "hello"
+
+        env.cow()
+            .args(["create", "conflict-ws", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/conflict-ws");
+
+        // Workspace modifies hello.txt and commits.
+        std::fs::write(workspace.join("hello.txt"), "workspace version").unwrap();
+        git(&workspace, &["add", "hello.txt"]);
+        git(&workspace, &["commit", "-m", "workspace change"]);
+
+        // Source also modifies hello.txt and commits (different content → conflict on rebase).
+        std::fs::write(source.path().join("hello.txt"), "source version").unwrap();
+        git(source.path(), &["add", "hello.txt"]);
+        git(source.path(), &["commit", "-m", "source change"]);
+
+        env.cow()
+            .args(["sync", "main", "--name", "conflict-ws"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("conflict"));
+
+        // Workspace must NOT be left in a rebase state.
+        let rebase_dir = workspace.join(".git").join("rebase-merge");
+        assert!(!rebase_dir.exists(), "rebase-merge dir should be absent after auto-abort");
+    }
+
     // ─── mcp ───────────────────────────────────────────────────────────────────
 
     #[test]

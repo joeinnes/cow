@@ -89,10 +89,52 @@ pub fn run(args: SyncArgs) -> Result<()> {
         .status();
 
     if !integrate_status.success() {
-        let strategy = if args.merge { "merge" } else { "rebase" };
+        if args.merge {
+            // For merge, just report failure — no automatic abort needed.
+            bail!(
+                "Failed to merge '{}' with source/{}. Resolve conflicts manually.",
+                name, source_branch
+            );
+        }
+
+        // For rebase, detect whether we're in a conflict state and auto-abort.
+        let rebase_dir = entry.path.join(".git").join("rebase-merge");
+        if rebase_dir.exists() {
+            // Collect conflicted files before aborting.
+            let conflicted = Command::new("git")
+                .args(["diff", "--name-only", "--diff-filter=U"])
+                .current_dir(&entry.path)
+                .output()
+                .ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+
+            // Auto-abort to leave the workspace in a clean state.
+            let _ = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(&entry.path)
+                .status();
+
+            if conflicted.is_empty() {
+                bail!(
+                    "Rebase conflict in workspace '{}' with source/{}. \
+                     The rebase has been aborted. Try cow sync --merge, or resolve manually.",
+                    name, source_branch
+                );
+            } else {
+                bail!(
+                    "Rebase conflict in workspace '{}' with source/{}.\n\
+                     Conflicting files:\n{}\n\
+                     The rebase has been aborted. Try cow sync --merge, or resolve manually.",
+                    name, source_branch,
+                    conflicted.lines().map(|l| format!("  {}", l)).collect::<Vec<_>>().join("\n")
+                );
+            }
+        }
+
         bail!(
-            "Failed to {} workspace '{}' onto '{}/{}'. Resolve conflicts and complete manually.",
-            strategy, name, "source", source_branch
+            "Failed to rebase workspace '{}' onto source/{}.",
+            name, source_branch
         );
     }
 
