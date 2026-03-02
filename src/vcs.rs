@@ -34,6 +34,12 @@ pub fn is_git_worktree(path: &Path) -> bool {
     path.join(".git").is_file()
 }
 
+/// Returns true if the path is a secondary jj workspace rather than a primary repository.
+/// Secondary workspaces have `.jj/` but no `.jj/repo/` — the repo backend lives in the primary.
+pub fn is_jj_secondary_workspace(path: &Path) -> bool {
+    path.join(".jj").is_dir() && !path.join(".jj").join("repo").is_dir()
+}
+
 /// Return the current branch name, or None if detached / unavailable.
 pub fn git_current_branch(path: &Path) -> Option<String> {
     let output = Command::new("git")
@@ -187,6 +193,27 @@ mod tests {
         let dir = TempDir::new().unwrap();
         std::fs::write(dir.path().join(".git"), "gitdir: /some/path").unwrap();
         assert!(is_git_worktree(dir.path()));
+    }
+
+    #[test]
+    fn is_jj_secondary_workspace_false_for_non_jj() {
+        let dir = TempDir::new().unwrap();
+        assert!(!is_jj_secondary_workspace(dir.path()));
+    }
+
+    #[test]
+    fn is_jj_secondary_workspace_false_for_primary() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".jj/repo")).unwrap();
+        assert!(!is_jj_secondary_workspace(dir.path()));
+    }
+
+    #[test]
+    fn is_jj_secondary_workspace_true_for_secondary() {
+        let dir = TempDir::new().unwrap();
+        std::fs::create_dir(dir.path().join(".jj")).unwrap();
+        // No .jj/repo/ → secondary workspace
+        assert!(is_jj_secondary_workspace(dir.path()));
     }
 
     #[test]
