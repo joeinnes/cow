@@ -1,9 +1,11 @@
-use std::ffi::CString;
 use std::path::Path;
 
-/// Returns true if the given path resides on an APFS filesystem.
-/// Uses the `statfs(2)` syscall directly to avoid any shell dependency.
+/// Returns true if the given path resides on an APFS filesystem (macOS only).
+/// On other platforms, always returns true so the check is a no-op.
+#[cfg(target_os = "macos")]
 pub fn is_apfs(path: &Path) -> bool {
+    use std::ffi::CString;
+
     // Allow test harnesses to simulate a non-APFS environment without
     // needing a real non-APFS volume.
     if std::env::var_os("COW_TEST_NOT_APFS").is_some() {
@@ -40,6 +42,11 @@ pub fn is_apfs(path: &Path) -> bool {
     ftype == "apfs"
 }
 
+#[cfg(not(target_os = "macos"))]
+pub fn is_apfs(_path: &Path) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,6 +59,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn returns_false_when_env_var_set() {
         // Uses a temp dir to avoid touching the real FS.
         let dir = tempfile::TempDir::new().unwrap();

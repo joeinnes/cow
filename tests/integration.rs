@@ -2324,6 +2324,7 @@ mod tests {
     // ─── non-APFS test ─────────────────────────────────────────────────────────
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn create_non_apfs_source_gives_error() {
         let env = Env::new();
         let source = make_git_repo();
