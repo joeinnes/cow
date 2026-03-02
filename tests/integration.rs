@@ -1297,13 +1297,15 @@ mod tests {
         let text = String::from_utf8_lossy(&raw);
         let resp: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 6);
 
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"cow_create"));
         assert!(names.contains(&"cow_list"));
         assert!(names.contains(&"cow_remove"));
         assert!(names.contains(&"cow_status"));
+        assert!(names.contains(&"cow_sync"));
+        assert!(names.contains(&"cow_extract"));
     }
 
     #[test]
@@ -2491,5 +2493,144 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("Unknown tool"));
+    }
+
+    #[test]
+    fn mcp_cow_sync() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "mcp-sync-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Advance source so there is something to sync.
+        std::fs::write(source.path().join("mcp_synced.txt"), "synced").unwrap();
+        git(source.path(), &["add", "mcp_synced.txt"]);
+        git(source.path(), &["commit", "-m", "advance"]);
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "cow_sync",
+                "arguments": {
+                    "name": "mcp-sync-ws",
+                    "source_branch": "main"
+                }
+            }
+        });
+
+        let raw = env.cow()
+            .arg("mcp")
+            .write_stdin(format!("{}\n", req).as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("Synced"));
+
+        let workspace = env.home.join(".cow/workspaces/mcp-sync-ws");
+        assert!(workspace.join("mcp_synced.txt").exists());
+    }
+
+    #[test]
+    fn mcp_cow_extract_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "mcp-extract-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/mcp-extract-ws");
+        std::fs::write(workspace.join("mcp_feature.txt"), "feature").unwrap();
+        git(&workspace, &["add", "mcp_feature.txt"]);
+        git(&workspace, &["commit", "-m", "add feature"]);
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "cow_extract",
+                "arguments": {
+                    "name": "mcp-extract-ws",
+                    "branch": "mcp-feature-branch"
+                }
+            }
+        });
+
+        let raw = env.cow()
+            .arg("mcp")
+            .write_stdin(format!("{}\n", req).as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("created in source repo"));
+
+        let branch_exists = std::process::Command::new("git")
+            .args(["rev-parse", "--verify", "mcp-feature-branch"])
+            .current_dir(source.path())
+            .status()
+            .unwrap()
+            .success();
+        assert!(branch_exists, "branch should exist in source repo");
+    }
+
+    #[test]
+    fn mcp_cow_extract_patch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "mcp-patch-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/mcp-patch-ws");
+        std::fs::write(workspace.join("patch_feature.txt"), "patch feature").unwrap();
+        git(&workspace, &["add", "patch_feature.txt"]);
+        git(&workspace, &["commit", "-m", "add patch feature"]);
+
+        let patch_path = env.home.join("mcp_out.patch");
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "cow_extract",
+                "arguments": {
+                    "name": "mcp-patch-ws",
+                    "patch": patch_path.to_str().unwrap()
+                }
+            }
+        });
+
+        let raw = env.cow()
+            .arg("mcp")
+            .write_stdin(format!("{}\n", req).as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(patch_path.exists(), "patch file should be written");
     }
 }
