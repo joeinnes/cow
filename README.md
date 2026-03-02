@@ -144,7 +144,9 @@ cd ~/repos/myapp && git push origin feature-x
 cow remove feature-x
 ```
 
-`cow sync` fetches from the source repo (no network — it is a local path) and rebases the workspace. `cow extract --branch` also does a local fetch in reverse: it lands the workspace's branch in the source repo without touching any remote.
+**Direction:** `cow sync` goes FROM source TO workspace (brings source changes into your workspace). `cow extract --branch` goes the other way — FROM workspace TO source (lands your workspace branch in the source repo for review). Neither touches a remote.
+
+When a workspace is freshly created it starts at the same HEAD as the source, so `cow sync` is effectively a no-op until the source repo accumulates new commits.
 
 ## How it works
 
