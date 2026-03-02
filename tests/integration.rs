@@ -734,6 +734,64 @@ mod tests {
         assert!(workspace.exists(), "workspace should still exist");
     }
 
+    #[test]
+    fn list_json_includes_dirty_and_current_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "list-json-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Make the workspace dirty.
+        std::fs::write(env.home.join(".cow/workspaces/list-json-ws/wip.txt"), "wip").unwrap();
+
+        let raw = env.cow()
+            .args(["list", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let arr: serde_json::Value = serde_json::from_slice(&raw).expect("valid JSON");
+        let ws = arr.as_array().unwrap()
+            .iter()
+            .find(|w| w["name"] == "list-json-ws")
+            .expect("workspace should appear in list");
+
+        assert_eq!(ws["dirty"], true, "dirty flag should be true");
+        assert!(ws["current_branch"].as_str().is_some(), "current_branch should be present");
+    }
+
+    #[test]
+    fn list_json_clean_workspace_not_dirty() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "list-clean-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let raw = env.cow()
+            .args(["list", "--json"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let arr: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        let ws = arr.as_array().unwrap()
+            .iter()
+            .find(|w| w["name"] == "list-clean-ws")
+            .unwrap();
+
+        assert_eq!(ws["dirty"], false);
+    }
+
     // ─── status ────────────────────────────────────────────────────────────────
 
     #[test]
@@ -1096,20 +1154,74 @@ mod tests {
     }
 
     #[test]
-    fn sync_jj_not_supported() {
+    fn sync_jj_workspace_rebases() {
         let env = Env::new();
         let source = make_jj_repo(&env.home);
 
         env.cow()
-            .args(["create", "jj-sync-ws", "--source", source.path().to_str().unwrap()])
+            .args(["create", "jj-sync-rebase", "--source", source.path().to_str().unwrap()])
             .assert()
             .success();
 
+        let workspace = env.home.join(".cow/workspaces/jj-sync-rebase");
+
+        // Advance source: add a commit and pin a bookmark to it.
+        std::fs::write(source.path().join("new.txt"), "source update").unwrap();
+        jj_run(&env.home, source.path(), &["describe", "-m", "source update"]);
+        jj_run(&env.home, source.path(), &["bookmark", "set", "main"]);
+        jj_run(&env.home, source.path(), &["new"]);
+
         env.cow()
-            .args(["sync", "main", "--name", "jj-sync-ws"])
+            .args(["sync", "main", "--name", "jj-sync-rebase"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Synced"));
+
+        // After rebase the source's "source update" commit is the workspace parent,
+        // so new.txt is visible in the working directory.
+        assert!(workspace.join("new.txt").exists());
+    }
+
+    #[test]
+    fn sync_jj_refuses_when_dirty() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-sync-dirty", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Write a file without describing — workspace is now dirty.
+        std::fs::write(
+            env.home.join(".cow/workspaces/jj-sync-dirty/dirty.txt"),
+            "uncommitted",
+        )
+        .unwrap();
+
+        env.cow()
+            .args(["sync", "main", "--name", "jj-sync-dirty"])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("not yet supported for jj"));
+            .stderr(predicate::str::contains("uncommitted changes"));
+    }
+
+    #[test]
+    fn sync_jj_requires_source_branch() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-sync-nobranch", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // No source_branch arg — should bail with a helpful message.
+        env.cow()
+            .args(["sync", "--name", "jj-sync-nobranch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("source branch explicitly"));
     }
 
     #[test]
@@ -2264,7 +2376,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_jj_branch_fails() {
+    fn extract_jj_branch() {
         let env = Env::new();
         let source = make_jj_repo(&env.home);
 
@@ -2273,11 +2385,27 @@ mod tests {
             .assert()
             .success();
 
+        let workspace = env.home.join(".cow/workspaces/jj-branch");
+
+        // Make a change in the workspace and commit it with jj.
+        std::fs::write(workspace.join("feature.txt"), "feature content").unwrap();
+        jj_run(&env.home, &workspace, &["describe", "-m", "add feature"]);
+        jj_run(&env.home, &workspace, &["new"]);
+
         env.cow()
-            .args(["extract", "jj-branch", "--branch", "some-branch"])
+            .args(["extract", "jj-branch", "--branch", "my-feature"])
             .assert()
-            .failure()
-            .stderr(predicate::str::contains("not yet supported for jj"));
+            .success()
+            .stdout(predicate::str::contains("Branch 'my-feature' created in source repo"));
+
+        // Verify the branch exists in the source repo.
+        let output = std::process::Command::new("git")
+            .args(["branch"])
+            .current_dir(source.path())
+            .output()
+            .expect("git branch");
+        let branches = String::from_utf8_lossy(&output.stdout);
+        assert!(branches.contains("my-feature"), "branch not found in source: {}", branches);
     }
 
     // ─── command-failure tests ──────────────────────────────────────────────────

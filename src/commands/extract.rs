@@ -95,9 +95,53 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                     source.display()
                 );
             }
-            // tarpaulin-ignore-start
-            Vcs::Jj => bail!("Branch extraction is not yet supported for jj workspaces."),
-            // tarpaulin-ignore-end
+            Vcs::Jj => {
+                // Export jj state to the git backend so HEAD reflects the
+                // latest committed change.
+                let export_status = Command::new("jj")
+                    .args(["git", "export"])
+                    .current_dir(&entry.path)
+                    .status()
+                    .context("Failed to run jj git export")?;
+                if !export_status.success() {
+                    bail!("Failed to export jj workspace state to git backend.");
+                }
+
+                // The source is a colocated jj+git repo — plain git remote
+                // operations work on its .git directory.
+                let source = &entry.source;
+                let remote_name = format!("cow-tmp-{}", args.name);
+
+                let add_status = Command::new("git")
+                    .args(["remote", "add", &remote_name, entry.path.to_str().unwrap()])
+                    .current_dir(source)
+                    .status()
+                    .context("Failed to add temporary remote")?;
+                if !add_status.success() {
+                    bail!("Failed to register workspace as a temporary remote in source repo.");
+                }
+
+                let fetch_status = Command::new("git")
+                    .args(["fetch", &remote_name, &format!("HEAD:{}", branch_name)])
+                    .current_dir(source)
+                    .status()
+                    .context("Failed to fetch from workspace")?;
+
+                let _ = Command::new("git")
+                    .args(["remote", "remove", &remote_name])
+                    .current_dir(source)
+                    .status();
+
+                if !fetch_status.success() {
+                    bail!("Failed to create branch '{}' in source repo.", branch_name);
+                }
+
+                println!(
+                    "Branch '{}' created in source repo at {}",
+                    branch_name,
+                    source.display()
+                );
+            }
         }
     }
 
