@@ -1011,6 +1011,138 @@ mod tests {
             .stderr(predicate::str::contains("not yet supported for jj"));
     }
 
+    #[test]
+    fn sync_default_branch_uses_workspace_branch() {
+        // No source_branch arg → syncs with workspace's current branch (main).
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // --no-branch keeps workspace on main so workspace branch == source branch.
+        env.cow()
+            .args(["create", "nobranch-ws", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/nobranch-ws");
+
+        // Advance source's main.
+        std::fs::write(source.path().join("default_sync.txt"), "default").unwrap();
+        git(source.path(), &["add", "default_sync.txt"]);
+        git(source.path(), &["commit", "-m", "advance main"]);
+
+        // Sync without specifying a branch — should default to workspace's current branch (main).
+        env.cow()
+            .args(["sync", "--name", "nobranch-ws"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Synced 'nobranch-ws'"));
+
+        assert!(workspace.join("default_sync.txt").exists());
+    }
+
+    #[test]
+    fn sync_cwd_detection() {
+        // Without --name, cow sync should detect workspace from current directory.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "cwd-sync-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/cwd-sync-ws");
+
+        std::fs::write(source.path().join("cwd_synced.txt"), "cwd").unwrap();
+        git(source.path(), &["add", "cwd_synced.txt"]);
+        git(source.path(), &["commit", "-m", "advance main"]);
+
+        // Run sync from inside the workspace with no --name.
+        env.cow()
+            .args(["sync", "main"])
+            .current_dir(&workspace)
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Synced 'cwd-sync-ws'"));
+
+        assert!(workspace.join("cwd_synced.txt").exists());
+    }
+
+    #[test]
+    fn sync_fetch_failure_bails() {
+        // Stub git to fail on fetch; should bail with helpful message and clean up remote.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "fetch-err-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let stub_dir = TempDir::new().expect("stub dir");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "/usr/bin/git".to_string());
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"fetch\" ]; then exit 1; fi\nexec {real_git} \"$@\"\n"
+            );
+            let stub_path = stub_dir.path().join("git");
+            std::fs::write(&stub_path, &script).unwrap();
+            std::fs::set_permissions(&stub_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        env.cow()
+            .args(["sync", "main", "--name", "fetch-err-ws"])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to fetch branch"));
+    }
+
+    #[test]
+    fn sync_rebase_failure_bails() {
+        // Stub git to fail on rebase; should bail with helpful message.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "rebase-err-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Advance source so there's something to fetch.
+        std::fs::write(source.path().join("advance.txt"), "advance").unwrap();
+        git(source.path(), &["add", "advance.txt"]);
+        git(source.path(), &["commit", "-m", "advance"]);
+
+        let stub_dir = TempDir::new().expect("stub dir");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "/usr/bin/git".to_string());
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"rebase\" ]; then exit 1; fi\nexec {real_git} \"$@\"\n"
+            );
+            let stub_path = stub_dir.path().join("git");
+            std::fs::write(&stub_path, &script).unwrap();
+            std::fs::set_permissions(&stub_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        env.cow()
+            .args(["sync", "main", "--name", "rebase-err-ws"])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to rebase workspace"));
+    }
+
     // ─── mcp ───────────────────────────────────────────────────────────────────
 
     #[test]
