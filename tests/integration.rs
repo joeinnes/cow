@@ -168,6 +168,71 @@ mod tests {
         );
     }
 
+    // ─── name-as-branch default (mai-uiz0) ────────────────────────────────────
+
+    fn workspace_branch(home: &std::path::Path, name: &str) -> String {
+        let ws = home.join(format!(".cow/workspaces/{name}"));
+        let out = std::process::Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(&ws)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn create_name_used_as_branch_by_default() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "my-feature", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        assert_eq!(workspace_branch(&env.home, "my-feature"), "my-feature");
+    }
+
+    #[test]
+    fn create_no_branch_flag_stays_on_source_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "my-feature", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        assert_eq!(workspace_branch(&env.home, "my-feature"), "main");
+    }
+
+    #[test]
+    fn create_auto_name_stays_on_source_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Auto-named workspace (agent-1) should stay on source branch.
+        assert_eq!(workspace_branch(&env.home, "agent-1"), "main");
+    }
+
+    #[test]
+    fn create_branch_flag_overrides_name() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "my-ws", "--source", source.path().to_str().unwrap(), "--branch", "other-branch"])
+            .assert()
+            .success();
+
+        assert_eq!(workspace_branch(&env.home, "my-ws"), "other-branch");
+    }
+
     #[test]
     fn create_from_git_worktree_fails() {
         let env = Env::new();

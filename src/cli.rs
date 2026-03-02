@@ -39,9 +39,14 @@ pub struct CreateArgs {
     #[arg(long)]
     pub source: Option<PathBuf>,
 
-    /// Git branch to check out in the new workspace (created if it does not exist)
+    /// Git branch to check out in the new workspace (created if it does not exist).
+    /// Defaults to the workspace name when a name is given.
     #[arg(long)]
     pub branch: Option<String>,
+
+    /// Do not switch or create a branch (stay on the source repo's current branch)
+    #[arg(long)]
+    pub no_branch: bool,
 
     /// jj change to edit in the new workspace
     #[arg(long)]
