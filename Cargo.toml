@@ -1,16 +1,16 @@
 [package]
-name = "sparse-worktree"
+name = "cow-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Copy-on-write workspace manager for parallel development"
 authors = ["Joe"]
 license = "MIT"
-homepage = "https://github.com/joeinn.es/sparse-worktree"
-repository = "https://github.com/joeinn.es/sparse-worktree"
+homepage = "https://github.com/joeinn.es/cow"
+repository = "https://github.com/joeinn.es/cow"
 keywords = ["git", "workspace", "apfs", "copy-on-write", "development"]
 
 [[bin]]
-name = "swt"
+name = "cow"
 path = "src/main.rs"
 
 [dependencies]
