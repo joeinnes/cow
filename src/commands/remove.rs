@@ -1,0 +1,115 @@
+use anyhow::{bail, Result};
+use colored::Colorize;
+use dialoguer::Confirm;
+
+use crate::{cli::RemoveArgs, state::State, vcs::{self, Vcs}};
+
+pub fn run(args: RemoveArgs) -> Result<()> {
+    if !args.all && args.names.is_empty() {
+        bail!("Specify one or more workspace names, or use --all.");
+    }
+
+    let mut state = State::load()?;
+    state.prune_deleted();
+
+    // Collect names to remove
+    let names: Vec<String> = if args.all {
+        let mut all: Vec<String> = state.workspaces.iter().map(|w| w.name.clone()).collect();
+        if let Some(ref source) = args.source {
+            let canonical = source
+                .canonicalize()
+                .unwrap_or_else(|_| source.to_path_buf());
+            all.retain(|name| {
+                state
+                    .workspaces
+                    .iter()
+                    .find(|w| w.name == *name)
+                    .map(|w| w.source == canonical)
+                    .unwrap_or(false)
+            });
+        }
+        all
+    } else {
+        args.names.clone()
+    };
+
+    if names.is_empty() {
+        println!("No workspaces to remove.");
+        return Ok(());
+    }
+
+    let mut removed = 0usize;
+
+    for name in &names {
+        let Some(entry) = state.get(name).cloned() else {
+            eprintln!("Workspace '{}' not found — skipping.", name);
+            continue;
+        };
+
+        if !entry.path.exists() {
+            // Already gone; just prune from state
+            state.remove(name);
+            continue;
+        }
+
+        let confirmed = match entry.vcs {
+            Vcs::Git => {
+                if vcs::git_is_dirty(&entry.path) && !args.force {
+                    let short = vcs::git_status_short(&entry.path);
+                    eprintln!(
+                        "{} Workspace '{}' has uncommitted changes:",
+                        "⚠".yellow(),
+                        name
+                    );
+                    for line in short.lines() {
+                        eprintln!("  {}", line);
+                    }
+                    confirm_or_default("Remove anyway? Changes will be lost.")?
+                } else {
+                    true
+                }
+            }
+
+            Vcs::Jj => {
+                if vcs::jj_is_dirty(&entry.path) {
+                    eprintln!(
+                        "Note: workspace '{}' has modifications. \
+                         These are preserved in the jj operation log of the source repo.",
+                        name
+                    );
+                }
+                if args.force {
+                    true
+                } else {
+                    confirm_or_default(&format!("Remove workspace '{}'?", name))?
+                }
+            }
+        };
+
+        if confirmed {
+            std::fs::remove_dir_all(&entry.path)?;
+            state.remove(name);
+            println!("Removed workspace '{}'", name);
+            removed += 1;
+        }
+    }
+
+    state.save()?;
+
+    if removed == 0 && !names.is_empty() {
+        println!("No workspaces were removed.");
+    }
+
+    Ok(())
+}
+
+/// Show a yes/no prompt. Returns false if stdin is not a TTY.
+fn confirm_or_default(prompt: &str) -> Result<bool> {
+    match Confirm::new().with_prompt(prompt).default(false).interact_opt()? {
+        Some(answer) => Ok(answer),
+        None => {
+            eprintln!("(Not a TTY — defaulting to no.)");
+            Ok(false)
+        }
+    }
+}
