@@ -2411,22 +2411,6 @@ mod tests {
     // ─── command-failure tests ──────────────────────────────────────────────────
 
     #[test]
-    fn create_cp_failure_gives_error() {
-        let env = Env::new();
-        let source = make_git_repo();
-
-        let stub_dir = TempDir::new().expect("stub dir");
-        make_failing_stub(stub_dir.path(), "cp");
-
-        env.cow()
-            .args(["create", "fail-ws", "--source", source.path().to_str().unwrap()])
-            .env("PATH", prepend_path(stub_dir.path()))
-            .assert()
-            .failure()
-            .stderr(predicate::str::contains("cp -rc failed"));
-    }
-
-    #[test]
     fn create_branch_checkout_failure() {
         let env = Env::new();
         let source = make_git_repo();

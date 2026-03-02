@@ -430,6 +430,7 @@
       border-radius: 8px;
       overflow-x: auto;
       box-shadow: var(--shadow);
+      white-space: pre;
     }
     .code-block .k { color: var(--term-green); }
     .code-block .s { color: var(--term-yellow); }
@@ -538,7 +539,9 @@
         <li><a href="#demo">demo</a></li>
         <li><a href="#compare">compare</a></li>
         <li><a href="#mcp">mcp</a></li>
+        <li><a href="docs.html">docs</a></li>
         <li><a href="#install">install</a></li>
+        <li><a href="changelog.html">changelog</a></li>
         <li><a href="https://github.com/joeinnes/cow">GitHub ↗</a></li>
       </ul>
     </div>
@@ -572,8 +575,8 @@
 
       <div class="hero-ctas">
         <a href="#how" class="btn btn-primary">How it works</a>
+        <a href="docs.html" class="btn btn-outline">Docs</a>
         <a href="https://github.com/joeinnes/cow" class="btn btn-outline">GitHub</a>
-        <a href="https://github.com/joeinnes/cow/blob/main/README.md" class="btn btn-outline">Docs</a>
       </div>
 
       <div class="hero-pills">
@@ -683,7 +686,7 @@
 
         <!-- ── "cow create" pill ── -->
         <rect x="268" y="100" width="224" height="24" rx="12" fill="#3a6b35"/>
-        <text x="380" y="116" font-family="'JetBrains Mono', monospace" font-size="10.5" font-weight="500" text-anchor="middle" fill="#e8f4e7">cow create  ·  ~40ms  ·  ~0 disk</text>
+        <text x="380" y="116" font-family="'JetBrains Mono', monospace" font-size="10.5" font-weight="500" text-anchor="middle" fill="#e8f4e7">cow create  ·  ~130ms  ·  ~0 disk</text>
 
         <!-- ── Pill → horizontal bar ── -->
         <line x1="380" y1="124" x2="380" y2="140" stroke="#ccc1a8" stroke-width="1.5"/>
@@ -763,80 +766,71 @@
         <div class="terminal-content">
 
           <div class="tab-panel active" id="tab-create">
-            <span class="t-line t-out"># Create a named workspace on a new branch</span>
+            <span class="t-line t-out"># create a named workspace; --branch overrides the branch name</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow create feat-auth --source ~/my-project --branch feat/auth</span></span>
-            <span class="t-line t-ok">✓ Detected APFS filesystem</span>
-            <span class="t-line t-ok">✓ Detected git repository</span>
-            <span class="t-line t-out">  Cloning via APFS copy-on-write…</span>
-            <span class="t-line t-ok">✓ Cloned in 41ms</span>
-            <span class="t-line t-ok">✓ Created branch 'feat/auth'</span>
-            <span class="t-line t-ok">✓ Created workspace 'feat-auth'</span>
-            <span class="t-line t-info">  → ~/.cow/workspaces/feat-auth</span>
+            <span class="t-line t-out">Cloning /Users/joe/my-project ...</span>
+            <span class="t-line t-ok">Created workspace 'feat-auth' at ~/.cow/workspaces/feat-auth</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># Omit the name and it auto-generates agent-1, agent-2, …</span>
+            <span class="t-line t-out"># omit the name and cow auto-generates agent-1, agent-2, …</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow create --source ~/my-project</span></span>
-            <span class="t-line t-ok">✓ Created workspace 'agent-1'</span>
-            <span class="t-line t-info">  → ~/.cow/workspaces/agent-1</span>
+            <span class="t-line t-out">Cloning /Users/joe/my-project ...</span>
+            <span class="t-line t-ok">Created workspace 'agent-1' at ~/.cow/workspaces/agent-1</span>
           </div>
 
           <div class="tab-panel" id="tab-list">
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow list</span></span>
-            <span class="t-line t-out">  NAME        BRANCH           STATUS    CREATED</span>
-            <span class="t-line t-out">  ─────────── ──────────────── ───────── ──────────────</span>
-            <span class="t-line"><span class="t-ok">  agent-1   </span><span class="t-out"> feat/auth        </span><span class="t-ok">clean    </span><span class="t-out"> 5 minutes ago</span></span>
-            <span class="t-line"><span class="t-info">  agent-2   </span><span class="t-out"> feat/api         </span><span class="t-info">dirty    </span><span class="t-out"> 8 minutes ago</span></span>
-            <span class="t-line"><span class="t-ok">  feat-auth </span><span class="t-out"> feat/auth        </span><span class="t-ok">clean    </span><span class="t-out"> 12 minutes ago</span></span>
+            <span class="t-line t-out">NAME           SOURCE                               BRANCH               STATUS  CREATED</span>
+            <span class="t-line t-out">──────────────────────────────────────────────────────────────────────────────────────</span>
+            <span class="t-line"><span class="t-out">agent-1        ~/my-project                         feat/auth            </span><span class="t-ok">clean  </span><span class="t-out"> 5 minutes ago</span></span>
+            <span class="t-line"><span class="t-out">agent-2        ~/my-project                         feat/api             </span><span class="t-info">dirty  </span><span class="t-out"> 8 minutes ago</span></span>
+            <span class="t-line"><span class="t-out">feat-auth      ~/my-project                         feat/auth            </span><span class="t-ok">clean  </span><span class="t-out"> 12 minutes ago</span></span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># JSON output for scripts and MCP tools</span>
+            <span class="t-line t-out"># --json for scripts and MCP tools</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow list --json</span></span>
-            <span class="t-line t-out">  [{"name":"agent-1","branch":"feat/auth","vcs":"git",…}]</span>
+            <span class="t-line t-out">[{"name":"agent-1","branch":"feat/auth","vcs":"git",…}]</span>
           </div>
 
           <div class="tab-panel" id="tab-remove">
-            <span class="t-line t-out"># Interactive: prompts if workspace has uncommitted changes</span>
+            <span class="t-line t-out"># prompts when workspace has uncommitted changes</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove agent-2</span></span>
-            <span class="t-line t-out">  Workspace 'agent-2' has uncommitted changes.</span>
-            <span class="t-line t-out">  Remove anyway? [y/N]: </span><span class="t-cmd">y</span>
-            <span class="t-line t-ok">✓ Removed workspace 'agent-2'</span>
+            <span class="t-line t-info">⚠ Workspace 'agent-2' has uncommitted changes:</span>
+            <span class="t-line t-out">   M src/api/routes.rs</span>
+            <span class="t-line t-out">Remove anyway? Changes will be lost. [y/N]: </span><span class="t-cmd">y</span>
+            <span class="t-line t-ok">Removed workspace 'agent-2'</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># --force skips the prompt entirely</span>
+            <span class="t-line t-out"># --force skips the prompt</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove --force agent-1 feat-auth</span></span>
-            <span class="t-line t-ok">✓ Removed workspace 'agent-1'</span>
-            <span class="t-line t-ok">✓ Removed workspace 'feat-auth'</span>
-            <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># Remove all workspaces from a given source repo</span>
-            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove --all --force --source ~/my-project</span></span>
+            <span class="t-line t-ok">Removed workspace 'agent-1'</span>
+            <span class="t-line t-ok">Removed workspace 'feat-auth'</span>
           </div>
 
           <div class="tab-panel" id="tab-extract">
-            <span class="t-line t-out"># Export changes as a patch file</span>
+            <span class="t-line t-out"># write a patch file</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow extract agent-2 --patch ~/auth-changes.patch</span></span>
-            <span class="t-line t-ok">✓ Wrote patch to ~/auth-changes.patch</span>
+            <span class="t-line t-ok">Patch written to /Users/joe/auth-changes.patch</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># Or push the branch to origin for a PR</span>
+            <span class="t-line t-out"># land the branch in the source repo so you can push a PR</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow extract agent-2 --branch feat/auth-review</span></span>
-            <span class="t-line t-out">  Pushing 'feat/auth-review' to origin…</span>
-            <span class="t-line t-ok">✓ Branch pushed to origin/feat/auth-review</span>
+            <span class="t-line t-ok">Branch 'feat/auth-review' created in source repo at ~/my-project</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># Then clean up the workspace</span>
+            <span class="t-line t-out"># clean up</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove --force agent-2</span></span>
+            <span class="t-line t-ok">Removed workspace 'agent-2'</span>
           </div>
 
           <div class="tab-panel" id="tab-status">
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow status agent-2</span></span>
-            <span class="t-line t-info">  Workspace: agent-2</span>
-            <span class="t-line t-out">  Path:      ~/.cow/workspaces/agent-2</span>
-            <span class="t-line t-out">  Source:    ~/my-project</span>
-            <span class="t-line t-out">  VCS:       git</span>
-            <span class="t-line t-out">  Branch:    feat/api</span>
-            <span class="t-line t-info">  Status:    dirty</span>
-            <span class="t-line t-out">  Created:   8 minutes ago</span>
+            <span class="t-line t-out">Workspace:  agent-2</span>
+            <span class="t-line t-out">Source:     /Users/joe/my-project</span>
+            <span class="t-line t-out">Branch:     feat/api</span>
+            <span class="t-line t-out">VCS:        git</span>
+            <span class="t-line t-info">Status:     dirty</span>
+            <span class="t-line t-out">Created:    2026-03-03 09:52:00 UTC</span>
+            <span class="t-line t-out">Disk delta: 14 KB (estimated from modified file sizes)</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out">  M  src/api/routes.rs</span>
-            <span class="t-line t-out">  A  src/api/middleware.rs</span>
-            <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># Also works from inside a workspace directory</span>
-            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cd ~/.cow/workspaces/agent-2 &amp;&amp; cow status</span></span>
+            <span class="t-line t-out">Modified files:</span>
+            <span class="t-line t-out">  M src/api/routes.rs</span>
+            <span class="t-line t-out">  A src/api/middleware.rs</span>
           </div>
 
         </div>
@@ -868,7 +862,7 @@
           <tbody>
             <tr>
               <td>Clone time (2 GB repo)</td>
-              <td class="hl-col ok">~40ms</td>
+              <td class="hl-col ok">~130ms</td>
               <td class="meh">~1s (no modules)</td>
               <td class="nope">3–8 minutes</td>
             </tr>
@@ -947,11 +941,11 @@
       <div class="mcp-grid">
         <div class="mcp-desc">
           <h3>Add to Claude Code</h3>
-          <p>Drop this snippet into your <code>~/.claude/claude.json</code> or a project-local <code>.claude/claude.json</code> to let Claude manage its own workspaces on your behalf.</p>
+          <p>Drop this snippet into your <code>~/.claude.json</code> or a project-local <code>.mcp.json</code> to let Claude manage its own workspaces on your behalf.</p>
           <p>Exposes four MCP tools: <code>cow_create</code>, <code>cow_list</code>, <code>cow_remove</code>, <code>cow_status</code>.</p>
           <p>Communicates over stdio — no ports, no background daemons, no port conflicts.</p>
         </div>
-        <div class="code-block"><span class="c">// ~/.claude/claude.json</span>
+        <div class="code-block"><span class="c">// ~/.claude.json</span>
 <span class="k">{</span>
   <span class="s">"mcpServers"</span>: <span class="k">{</span>
     <span class="s">"cow"</span>: <span class="k">{</span>
@@ -1014,9 +1008,9 @@ cow --version</div>
       </div>
       <ul class="footer-links">
         <li><a href="https://github.com/joeinnes/cow">GitHub</a></li>
-        <li><a href="https://github.com/joeinnes/cow/blob/main/README.md">Docs</a></li>
+        <li><a href="docs.html">Docs</a></li>
+        <li><a href="changelog.html">Changelog</a></li>
         <li><a href="https://github.com/joeinnes/cow/issues">Issues</a></li>
-        <li><a href="https://github.com/joeinnes/cow/releases">Releases</a></li>
         <li><a href="https://github.com/joeinnes/cow/blob/main/LICENSE">MIT Licence</a></li>
       </ul>
     </div>

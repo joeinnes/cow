@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>cow — Command Reference</title>
+  <meta name="description" content="Complete command reference for cow, the APFS copy-on-write workspace manager.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐄</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400;1,700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+
+  <style>
+    /* ─── Reset ──────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ─── Tokens ─────────────────────────────────────────── */
+    :root {
+      --cream:        #f5f0e5;
+      --cream-card:   #faf7f0;
+      --ink:          #18130a;
+      --ink-mid:      #3d3020;
+      --ink-soft:     #6b5d48;
+      --green:        #3a6b35;
+      --green-hover:  #2e5529;
+      --rust:         #b04040;
+      --amber:        #c47820;
+      --border:       #ccc1a8;
+      --border-light: #ddd5be;
+      --term-bg:      #1b1814;
+      --term-fg:      #ddd5be;
+      --term-green:   #8bc88b;
+      --term-yellow:  #d4b96a;
+      --term-dim:     #7a7060;
+      --radius:       10px;
+      --shadow:       0 2px 10px rgba(24,19,10,.10), 0 1px 3px rgba(24,19,10,.07);
+      --shadow-lg:    0 8px 32px rgba(24,19,10,.14), 0 2px 8px rgba(24,19,10,.08);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: var(--cream);
+      color: var(--ink);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ─── Holstein cow-patch background ─────────────────── */
+    #cow-bg {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+      opacity: 0.065;
+    }
+
+    /* ─── Nav ────────────────────────────────────────────── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(245,240,229,.9);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-light);
+      padding: 14px 0;
+    }
+    .nav-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      z-index: 1;
+    }
+    .nav-brand {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--ink);
+      text-decoration: none;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      list-style: none;
+    }
+    .nav-links a {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      text-decoration: none;
+    }
+    .nav-links a:hover { color: var(--ink); }
+    .nav-links .active { color: var(--ink); font-weight: 600; }
+
+    /* ─── Layout ─────────────────────────────────────────── */
+    .page-wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 0 56px;
+      align-items: start;
+    }
+
+    /* ─── Sidebar ─────────────────────────────────────────── */
+    .sidebar {
+      position: sticky;
+      top: 72px;
+      padding: 48px 0 80px;
+    }
+    .sidebar-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-bottom: 12px;
+      display: block;
+    }
+    .sidebar-nav {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sidebar-nav a {
+      display: block;
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 6px;
+      transition: background .12s, color .12s;
+    }
+    .sidebar-nav a:hover {
+      background: rgba(24,19,10,.06);
+      color: var(--ink);
+    }
+    .sidebar-nav a.active {
+      background: rgba(58,107,53,.10);
+      color: var(--green);
+      font-weight: 600;
+    }
+    .sidebar-divider {
+      border: none;
+      border-top: 1px solid var(--border-light);
+      margin: 14px 10px;
+    }
+
+    /* ─── Main content ────────────────────────────────────── */
+    .docs-main {
+      padding: 48px 0 80px;
+      min-width: 0;
+    }
+
+    .page-header {
+      margin-bottom: 52px;
+      padding-bottom: 36px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .section-label {
+      display: block;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--green);
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(1.8rem, 4vw, 2.8rem);
+      font-weight: 900;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+    }
+    .header-desc {
+      font-size: 0.9rem;
+      color: var(--ink-soft);
+      margin-top: 12px;
+    }
+
+    /* ─── Typography ─────────────────────────────────────── */
+    h3 {
+      font-family: 'Playfair Display', serif;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+    }
+    p  { color: var(--ink-mid); line-height: 1.75; }
+    a  { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
+    a:hover { color: var(--green-hover); }
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88em;
+      background: rgba(24,19,10,.07);
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+    em { font-style: italic; color: var(--ink-mid); }
+
+    /* ─── Command blocks ──────────────────────────────────── */
+    .cmd-block {
+      margin-bottom: 52px;
+      padding-bottom: 52px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .cmd-block:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+
+    .cmd-sig {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.05rem;
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+    .cmd-sig code {
+      background: none;
+      padding: 0;
+      font-size: 1.05rem;
+      color: var(--green);
+      font-weight: 700;
+    }
+    .cmd-desc {
+      font-size: 0.88rem;
+      color: var(--ink-mid);
+      margin-bottom: 22px;
+      line-height: 1.75;
+    }
+
+    /* ─── Options table ───────────────────────────────────── */
+    .opts-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--cream-card);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      margin-bottom: 16px;
+    }
+    .opts-table th, .opts-table td {
+      text-align: left;
+      padding: 10px 16px;
+      font-size: 0.82rem;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .opts-table th {
+      background: rgba(24,19,10,.05);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--ink-soft);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+    }
+    .opts-table tr:last-child td { border-bottom: none; }
+    .opts-table code { font-size: 0.82em; white-space: nowrap; }
+    .opts-table td:first-child { color: var(--green); font-weight: 600; white-space: nowrap; }
+    .opts-table td:last-child { color: var(--ink-mid); }
+
+    /* ─── Notes ───────────────────────────────────────────── */
+    .cmd-note {
+      font-size: 0.83rem;
+      color: var(--ink-soft);
+      background: var(--cream-card);
+      border-left: 3px solid var(--green);
+      padding: 10px 16px;
+      border-radius: 0 6px 6px 0;
+      margin-top: 14px;
+      line-height: 1.7;
+    }
+    .cmd-note code { font-size: 0.82em; }
+
+    /* ─── Code block ──────────────────────────────────────── */
+    .code-block {
+      background: var(--term-bg);
+      color: var(--term-fg);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      line-height: 1.75;
+      padding: 20px 22px;
+      border-radius: 8px;
+      overflow-x: auto;
+      box-shadow: var(--shadow);
+      white-space: pre;
+      margin-top: 14px;
+    }
+    .code-block .k { color: var(--term-green); }
+    .code-block .s { color: var(--term-yellow); }
+    .code-block .c { color: var(--term-dim); }
+
+    /* ─── Footer ─────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px 0;
+      position: relative;
+      z-index: 1;
+    }
+    .footer-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .footer-left { display: flex; flex-direction: column; gap: 4px; }
+    .footer-brand {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .footer-aside { font-size: 0.76rem; color: var(--ink-soft); font-style: italic; }
+    .footer-links { display: flex; gap: 20px; list-style: none; flex-wrap: wrap; }
+    .footer-links a { font-size: 0.8rem; color: var(--ink-soft); text-decoration: none; }
+    .footer-links a:hover { color: var(--ink); }
+
+    /* ─── Responsive ─────────────────────────────────────── */
+    @media (max-width: 720px) {
+      .page-wrap { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Holstein cow-patch background ─────────────────── -->
+  <svg id="cow-bg" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <pattern id="cow-patch" x="0" y="0" width="800" height="560" patternUnits="userSpaceOnUse">
+        <path d="M110,44 C164,10 236,18 264,68 C292,118 266,176 216,190 C166,204 104,180 82,132 C60,84 56,78 110,44Z" fill="#1a1208"/>
+        <path d="M504,32 C552,2 618,16 644,66 C670,116 640,168 592,178 C544,188 500,154 496,108 C492,62 456,62 504,32Z" fill="#1a1208"/>
+        <path d="M736,104 C768,80 800,94 800,136 C800,178 766,204 736,194 C706,184 688,154 700,124 C712,94 704,128 736,104Z" fill="#1a1208"/>
+        <path d="M56,336 C108,292 192,306 220,356 C248,406 220,468 168,480 C116,492 56,464 44,412 C32,360 4,380 56,336Z" fill="#1a1208"/>
+        <path d="M344,364 C392,324 466,336 488,388 C510,440 474,500 424,504 C374,508 330,474 328,424 C326,374 296,404 344,364Z" fill="#1a1208"/>
+        <path d="M644,384 C680,356 728,368 736,412 C744,456 706,486 674,476 C642,466 620,436 632,404 C644,372 608,412 644,384Z" fill="#1a1208"/>
+        <path d="M740,248 C764,232 792,244 794,276 C796,308 770,326 748,316 C726,306 716,278 728,256 C740,234 716,264 740,248Z" fill="#1a1208"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#cow-patch)"/>
+  </svg>
+
+  <!-- ─── Nav ──────────────────────────────────────────── -->
+  <nav>
+    <div class="nav-inner">
+      <a href="index.html" class="nav-brand">🐄 cow</a>
+      <ul class="nav-links">
+        <li><a href="index.html#how">how it works</a></li>
+        <li><a href="docs.html" class="active">docs</a></li>
+        <li><a href="index.html#install">install</a></li>
+        <li><a href="changelog.html">changelog</a></li>
+        <li><a href="https://github.com/joeinnes/cow">GitHub ↗</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page-wrap">
+
+    <!-- ─── Sidebar ──────────────────────────────────────── -->
+    <aside class="sidebar">
+      <span class="sidebar-label">Commands</span>
+      <ul class="sidebar-nav">
+        <li><a href="#cmd-create">create</a></li>
+        <li><a href="#cmd-list">list</a></li>
+        <li><a href="#cmd-status">status</a></li>
+        <li><a href="#cmd-diff">diff</a></li>
+        <li><a href="#cmd-extract">extract</a></li>
+        <li><a href="#cmd-remove">remove</a></li>
+        <li><a href="#cmd-sync">sync</a></li>
+        <li><a href="#cmd-cd">cd</a></li>
+        <li><a href="#cmd-mcp">mcp</a></li>
+      </ul>
+      <hr class="sidebar-divider">
+      <ul class="sidebar-nav">
+        <li><a href="#cmd-cowjson">.cow.json</a></li>
+      </ul>
+    </aside>
+
+    <!-- ─── Main ─────────────────────────────────────────── -->
+    <main class="docs-main">
+
+      <header class="page-header">
+        <span class="section-label">command reference</span>
+        <h1>All nine commands.</h1>
+        <p class="header-desc">Complete reference for every <code>cow</code> command and option.</p>
+      </header>
+
+      <!-- create -->
+      <div class="cmd-block" id="cmd-create">
+        <h3 class="cmd-sig"><code>cow create [OPTIONS] [NAME]</code></h3>
+        <p class="cmd-desc">Create a new workspace from a repository using APFS copy-on-write. When a name is given it is also used as the branch name (created if it does not exist). Omit the name and cow auto-generates <code>agent-1</code>, <code>agent-2</code>, and so on.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Source repository to clone (default: current directory)</td></tr>
+            <tr><td><code>--branch &lt;BRANCH&gt;</code></td><td>Override the branch name (default: same as workspace name)</td></tr>
+            <tr><td><code>--no-branch</code></td><td>Do not switch or create a branch after cloning</td></tr>
+            <tr><td><code>--change &lt;CHANGE&gt;</code></td><td>jj change ID to edit in the new workspace (jj repos only)</td></tr>
+            <tr><td><code>--dir &lt;PATH&gt;</code></td><td>Parent directory for workspaces (default: <code>~/.cow/workspaces/</code>)</td></tr>
+            <tr><td><code>--no-clean</code></td><td>Skip post-clone cleanup of runtime artefacts (<code>.pid</code>, <code>.sock</code>, etc.)</td></tr>
+          </tbody>
+        </table>
+        <div class="cmd-note">
+          Uses <code>clonefile(2)</code> directly — the same kernel syscall Time Machine uses. A 2 GB repository clones in around 130 ms wall time, with near-zero extra disk until files are modified.
+        </div>
+      </div>
+
+      <!-- list -->
+      <div class="cmd-block" id="cmd-list">
+        <h3 class="cmd-sig"><code>cow list [OPTIONS]</code></h3>
+        <p class="cmd-desc">List all active workspaces managed by cow, showing their name, source repository, branch, VCS, and creation time.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Filter to workspaces created from this source repository</td></tr>
+            <tr><td><code>--json</code></td><td>Machine-readable JSON output for scripting and MCP tools</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- status -->
+      <div class="cmd-block" id="cmd-status">
+        <h3 class="cmd-sig"><code>cow status [NAME]</code></h3>
+        <p class="cmd-desc">Show detailed status of a workspace, including its path, source repository, branch, dirty/clean state, and a short diff summary. Defaults to the current directory if it is a cow workspace.</p>
+      </div>
+
+      <!-- diff -->
+      <div class="cmd-block" id="cmd-diff">
+        <h3 class="cmd-sig"><code>cow diff [NAME]</code></h3>
+        <p class="cmd-desc">Show uncommitted changes in a workspace relative to its last commit. Passes through to <code>git diff</code> or <code>jj diff</code> as appropriate. Defaults to the current directory if inside a workspace.</p>
+      </div>
+
+      <!-- extract -->
+      <div class="cmd-block" id="cmd-extract">
+        <h3 class="cmd-sig"><code>cow extract [OPTIONS] &lt;NAME&gt;</code></h3>
+        <p class="cmd-desc">Extract committed changes from a workspace back into the source repository. Use <code>--patch</code> to produce a patch file for review, or <code>--branch</code> to land the branch directly in the source repo so you can push a PR normally.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--patch &lt;FILE&gt;</code></td><td>Write a unified diff patch to this file</td></tr>
+            <tr><td><code>--branch &lt;NAME&gt;</code></td><td>Create (or update) this branch in the source repo at workspace HEAD</td></tr>
+          </tbody>
+        </table>
+        <div class="cmd-note">
+          Direction: <code>cow extract</code> goes <em>from workspace to source</em>. <code>cow sync</code> goes the other way.
+        </div>
+      </div>
+
+      <!-- remove -->
+      <div class="cmd-block" id="cmd-remove">
+        <h3 class="cmd-sig"><code>cow remove [OPTIONS] &lt;NAME...&gt;</code></h3>
+        <p class="cmd-desc">Remove one or more workspaces. Warns before removing workspaces with uncommitted changes, and offers to push unpushed commits first. Pass multiple names to remove several workspaces at once.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--force</code></td><td>Skip dirty-state warnings and remove without prompting</td></tr>
+            <tr><td><code>--all</code></td><td>Remove all workspaces (can be scoped with <code>--source</code>)</td></tr>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Scope <code>--all</code> to workspaces from this source repository</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- sync -->
+      <div class="cmd-block" id="cmd-sync">
+        <h3 class="cmd-sig"><code>cow sync [SOURCE_BRANCH]</code></h3>
+        <p class="cmd-desc">Fetch the latest commits from the source repository and rebase (or merge) the workspace onto them. Defaults to syncing with the workspace's own branch; pass a branch name to sync against a different one (e.g. <code>cow sync main</code>).</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--merge</code></td><td>Merge instead of rebase</td></tr>
+            <tr><td><code>--name &lt;NAME&gt;</code></td><td>Target a named workspace instead of auto-detecting from the current directory</td></tr>
+          </tbody>
+        </table>
+        <div class="cmd-note">Not yet supported for jj workspaces.</div>
+      </div>
+
+      <!-- cd -->
+      <div class="cmd-block" id="cmd-cd">
+        <h3 class="cmd-sig"><code>cow cd &lt;NAME&gt;</code></h3>
+        <p class="cmd-desc">Print the absolute path of a named workspace. Designed for shell integration rather than direct use.</p>
+        <div class="cmd-note">Add to <code>~/.zshrc</code> or <code>~/.bashrc</code>:<br><br>
+          <code>function cowcd() { cd "$(cow cd "$1")"; }</code><br><br>
+          Then use <code>cowcd feature-x</code> to jump straight into a workspace.
+        </div>
+      </div>
+
+      <!-- mcp -->
+      <div class="cmd-block" id="cmd-mcp">
+        <h3 class="cmd-sig"><code>cow mcp</code></h3>
+        <p class="cmd-desc">Run cow as a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> stdio server, exposing <code>cow_create</code>, <code>cow_list</code>, <code>cow_remove</code>, <code>cow_status</code>, and <code>cow_diff</code> as MCP tools so agents can manage workspaces without any human intervention.</p>
+        <div class="cmd-note">
+          Configure in <code>~/.claude.json</code> (global) or a project-local <code>.mcp.json</code>. See the <a href="index.html#mcp">MCP section</a> on the homepage for the config snippet.
+        </div>
+      </div>
+
+      <!-- .cow.json -->
+      <div class="cmd-block" id="cmd-cowjson">
+        <h3 class="cmd-sig"><code>.cow.json</code> — project config</h3>
+        <p class="cmd-desc">Add a <code>.cow.json</code> to the root of your repository to define project-specific post-clone behaviour. Runs automatically after every <code>cow create</code>.</p>
+        <div class="code-block"><span class="k">{</span>
+  <span class="s">"post_clone"</span>: <span class="k">{</span>
+    <span class="c">// Paths to remove (glob patterns ok)</span>
+    <span class="s">"remove"</span>: [<span class="s">".next/server"</span>, <span class="s">"*.pid"</span>, <span class="s">"*.sock"</span>],
+    <span class="c">// Commands to run inside the new workspace</span>
+    <span class="s">"run"</span>: [<span class="s">"npm run codegen"</span>]
+  <span class="k">}</span>
+<span class="k">}</span></div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ─── Footer ───────────────────────────────────────── -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-left">
+        <span class="footer-brand">🐄 cow</span>
+        <span class="footer-aside">yes, we know what it sounds like.</span>
+      </div>
+      <ul class="footer-links">
+        <li><a href="https://github.com/joeinnes/cow">GitHub</a></li>
+        <li><a href="docs.html">Docs</a></li>
+        <li><a href="changelog.html">Changelog</a></li>
+        <li><a href="https://github.com/joeinnes/cow/issues">Issues</a></li>
+        <li><a href="https://github.com/joeinnes/cow/blob/main/LICENSE">MIT Licence</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    // Highlight the active sidebar link on scroll
+    const headings = document.querySelectorAll('.cmd-block[id]');
+    const links = document.querySelectorAll('.sidebar-nav a');
+    const obs = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          links.forEach(l => l.classList.remove('active'));
+          const active = document.querySelector(`.sidebar-nav a[href="#${e.target.id}"]`);
+          if (active) active.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    headings.forEach(h => obs.observe(h));
+  </script>
+
+</body>
+</html>
