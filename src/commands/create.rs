@@ -192,13 +192,8 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
 
 // tarpaulin-ignore-start
 fn setup_jj(workspace: &Path, change: Option<&str>) -> Result<()> {
-    // Detach from the source's workspace list so the two workspaces
-    // are independent. Errors here are non-fatal — jj may not be installed
-    // or the workspace structure might already be detached.
-    let _ = Command::new("jj")
-        .args(["workspace", "forget"])
-        .current_dir(workspace)
-        .output();
+    // The cp -rc clone already has its own .jj/ at a different path, so it is
+    // independent from the source without any extra steps.
 
     if let Some(change_id) = change {
         let status = Command::new("jj")
