@@ -1,6 +1,6 @@
 ---
 id: mai-c6is
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-02T11:14:30Z
