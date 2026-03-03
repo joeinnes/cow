@@ -30,6 +30,8 @@ pub enum Commands {
     Cd(CdArgs),
     /// Sync a workspace with its source repository
     Sync(SyncArgs),
+    /// Migrate existing git worktrees, jj workspaces, or orphaned directories to cow workspaces
+    Migrate(MigrateArgs),
     /// Run as a Model Context Protocol (MCP) stdio server
     Mcp,
 }
@@ -128,6 +130,25 @@ pub struct SyncArgs {
     /// Merge instead of rebase
     #[arg(long)]
     pub merge: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct MigrateArgs {
+    /// Source repository path (defaults to current directory)
+    #[arg(long)]
+    pub source: Option<PathBuf>,
+
+    /// Migrate all discovered candidates
+    #[arg(long)]
+    pub all: bool,
+
+    /// Skip dirty-state checks and migrate anyway
+    #[arg(long)]
+    pub force: bool,
+
+    /// Show what would be done without making any changes
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 #[derive(clap::Args, Debug)]

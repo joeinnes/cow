@@ -4,6 +4,7 @@ mod diff;
 mod extract;
 mod list;
 mod mcp;
+mod migrate;
 mod remove;
 mod status;
 mod sync;
@@ -16,6 +17,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Cd(args) => cd::run(args),
         Commands::Create(args) => create::run(args),
         Commands::List(args) => list::run(args),
+        Commands::Migrate(args) => migrate::run(args),
         Commands::Remove(args) => remove::run(args),
         Commands::Status(args) => status::run(args),
         Commands::Diff(args) => diff::run(args),
