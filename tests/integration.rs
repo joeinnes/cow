@@ -2541,7 +2541,7 @@ mod tests {
             ])
             .assert()
             .failure()
-            .stderr(predicate::str::contains("Failed to check out change"));
+            .stderr(predicate::str::contains("Failed to edit change"));
     }
 
     #[test]
@@ -3114,5 +3114,92 @@ mod tests {
             .assert()
             .failure()
             .stderr(predicate::str::contains("git worktree"));
+    }
+
+    // ─── create: atomic rollback ────────────────────────────────────────────
+
+    #[test]
+    fn create_rollback_removes_dest_on_post_clone_failure() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // A .cow.json whose post-clone command always fails.
+        std::fs::write(
+            source.path().join(".cow.json"),
+            r#"{"post_clone":{"run":["false"]}}"#,
+        ).unwrap();
+
+        env.cow()
+            .args(["create", "rollback-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .failure();
+
+        // The workspace directory must not exist after failure.
+        let dest = env.home.join(".cow/workspaces/rollback-ws");
+        assert!(!dest.exists(), "dest dir should be removed after failed create");
+
+        // Nothing should be registered in state.
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("rollback-ws").not());
+    }
+
+    #[test]
+    fn create_rollback_does_not_affect_successful_create() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "good-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let dest = env.home.join(".cow/workspaces/good-ws");
+        assert!(dest.exists(), "dest dir should exist after successful create");
+    }
+
+    // ─── create: output messages ─────────────────────────────────────────────
+
+    #[test]
+    fn create_output_includes_remove_hint() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "hint-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("cow remove hint-ws"));
+    }
+
+    #[test]
+    fn create_output_mentions_cow_json_when_absent() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "nojson-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(".cow.json"));
+    }
+
+    #[test]
+    fn create_output_does_not_mention_cow_json_when_present() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        std::fs::write(
+            source.path().join(".cow.json"),
+            r#"{"post_clone":{}}"#,
+        ).unwrap();
+
+        env.cow()
+            .args(["create", "hasjson-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(".cow.json").not());
     }
 }
