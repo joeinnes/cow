@@ -3272,4 +3272,73 @@ mod tests {
             .success()
             .stdout(predicate::str::contains(".cow.json").not());
     }
+
+    #[test]
+    fn remove_yes_skips_dirty_confirm() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "dirty-yes", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/dirty-yes");
+        std::fs::write(workspace.join("change.txt"), "modified").unwrap();
+        git(&workspace, &["add", "change.txt"]);
+
+        // --yes should skip the "remove anyway?" prompt but still print the warning
+        env.cow()
+            .args(["remove", "--yes", "dirty-yes"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("uncommitted changes"))
+            .stdout(predicate::str::contains("Removed workspace 'dirty-yes'"));
+
+        assert!(!workspace.exists(), "workspace should be deleted");
+    }
+
+    #[test]
+    fn create_print_path_outputs_only_path() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let output = env.cow()
+            .args(["create", "path-ws", "--source", source.path().to_str().unwrap(), "--print-path"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let stdout = String::from_utf8(output).unwrap();
+        let lines: Vec<&str> = stdout.lines().collect();
+
+        // Only one line: the path
+        assert_eq!(lines.len(), 1, "expected only the path on stdout, got: {:?}", lines);
+        assert!(lines[0].contains("path-ws"), "path should contain workspace name");
+        assert!(std::path::Path::new(lines[0].trim()).exists(), "printed path should exist on disk");
+    }
+
+    #[test]
+    fn list_text_shows_dirty_file_count() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "count-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/count-ws");
+        std::fs::write(workspace.join("a.txt"), "a").unwrap();
+        std::fs::write(workspace.join("b.txt"), "b").unwrap();
+        git(&workspace, &["add", "a.txt", "b.txt"]);
+
+        env.cow()
+            .arg("list")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("dirty (2)"));
+    }
 }
