@@ -66,25 +66,41 @@ pub fn run(args: CreateArgs) -> Result<()> {
     state.prune_deleted();
 
     // Workspace parent directory
+    let has_custom_dir = args.dir.is_some();
     let workspace_dir = match args.dir {
         Some(d) => d,
         None => state::default_workspace_dir()?,
     };
 
+    // Source basename used to scope the workspace name.
+    let basename = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("workspace")
+        .to_string();
+
     // Workspace name
     let name_was_given = args.name.is_some();
     let name = match args.name {
         Some(n) => {
-            validate_name(&n)?;
-            n
+            if n.contains('/') {
+                // User supplied an explicit scope — validate the whole thing.
+                validate_name(&n)?;
+                n
+            } else {
+                // Auto-scope: prepend source basename.
+                validate_name(&n)?;
+                format!("{}/{}", basename, n)
+            }
         }
-        None => state.next_agent_name(),
+        None => state.next_scoped_name(&basename),
     };
 
-    // Default: use workspace name as branch when the caller gave an explicit name
-    // and did not pass --branch or --no-branch.
+    // Default: use the unscoped part of the workspace name as the branch when
+    // the caller gave an explicit name and did not pass --branch or --no-branch.
+    let name_suffix = name.rsplit('/').next().unwrap_or(&name).to_string();
     let branch_arg = if args.branch.is_none() && !args.no_branch && name_was_given {
-        Some(name.clone())
+        Some(name_suffix.clone())
     } else {
         args.branch
     };
@@ -94,7 +110,13 @@ pub fn run(args: CreateArgs) -> Result<()> {
         bail!("A workspace named '{}' already exists. Choose a different name.", name);
     }
 
-    let dest = workspace_dir.join(&name);
+    // With --dir, use just the unscoped name suffix as the directory name so
+    // the workspace lands exactly at <dir>/<suffix> rather than <dir>/<scope>/<suffix>.
+    let dest = if has_custom_dir {
+        workspace_dir.join(&name_suffix)
+    } else {
+        workspace_dir.join(&name)
+    };
     if dest.exists() {
         bail!(
             "Destination '{}' already exists on disk. \
@@ -103,8 +125,12 @@ pub fn run(args: CreateArgs) -> Result<()> {
         );
     }
 
-    std::fs::create_dir_all(&workspace_dir)
-        .with_context(|| format!("Failed to create workspace directory: {}", workspace_dir.display()))?;
+    // dest may have a sub-directory component (e.g. workspaces/project/name),
+    // so create all parents up to but not including dest itself.
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create workspace directory: {}", parent.display()))?;
+    }
 
     // CoW clone
     if !args.print_path {
@@ -280,11 +306,21 @@ fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("Workspace name cannot be empty.");
     }
-    if name.contains('/') || name.contains('\0') {
+    if name.contains('\0') {
         bail!("Workspace name '{}' contains invalid characters.", name);
     }
-    if name == "." || name == ".." {
-        bail!("Workspace name '{}' is not allowed.", name);
+    if name.starts_with('/') || name.ends_with('/') {
+        bail!("Workspace name '{}' contains invalid characters.", name);
+    }
+    // At most one '/' — more than one means multiple path components.
+    if name.chars().filter(|&c| c == '/').count() > 1 {
+        bail!("Workspace name '{}' contains invalid characters.", name);
+    }
+    // Neither part may be '.' or '..'.
+    for part in name.split('/') {
+        if part == "." || part == ".." {
+            bail!("Workspace name '{}' is not allowed.", name);
+        }
     }
     Ok(())
 }
@@ -631,6 +667,8 @@ mod tests {
         assert!(validate_name("my-workspace").is_ok());
         assert!(validate_name("agent-1").is_ok());
         assert!(validate_name("abc").is_ok());
+        assert!(validate_name("project/feature-x").is_ok());
+        assert!(validate_name("brightblur/cache-cleanup").is_ok());
     }
 
     #[test]
@@ -639,8 +677,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_name_rejects_slash() {
-        assert!(validate_name("foo/bar").is_err());
+    fn validate_name_rejects_multiple_slashes() {
+        assert!(validate_name("foo/bar/baz").is_err());
+    }
+
+    #[test]
+    fn validate_name_rejects_leading_slash() {
+        assert!(validate_name("/foo").is_err());
+    }
+
+    #[test]
+    fn validate_name_rejects_trailing_slash() {
+        assert!(validate_name("foo/").is_err());
     }
 
     #[test]
@@ -652,6 +700,9 @@ mod tests {
     fn validate_name_rejects_dot() {
         assert!(validate_name(".").is_err());
         assert!(validate_name("..").is_err());
+        assert!(validate_name("./bar").is_err());
+        assert!(validate_name("../bar").is_err());
+        assert!(validate_name("foo/..").is_err());
     }
 
     #[test]

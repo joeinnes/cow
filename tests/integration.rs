@@ -15,6 +15,21 @@ mod tests {
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
+    /// Return the basename of a source TempDir as a string slice.
+    fn src_name(source: &TempDir) -> &str {
+        source.path().file_name().unwrap().to_str().unwrap()
+    }
+
+    /// Build the expected workspace path: `~/.cow/workspaces/<src_basename>/<name>`.
+    fn ws_path(home: &Path, source: &TempDir, name: &str) -> PathBuf {
+        home.join(format!(".cow/workspaces/{}/{}", src_name(source), name))
+    }
+
+    /// Return the scoped workspace name: `<src_basename>/<name>`.
+    fn scoped(source: &TempDir, name: &str) -> String {
+        format!("{}/{}", src_name(source), name)
+    }
+
     /// An isolated environment for one test: its own HOME so the state file
     /// and default workspace directory are completely separate.
     struct Env {
@@ -86,9 +101,9 @@ mod tests {
             .args(["create", "my-workspace", "--source", source.path().to_str().unwrap()])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Created workspace 'my-workspace'"));
+            .stdout(predicate::str::contains("my-workspace"));
 
-        let workspace = env.home.join(".cow/workspaces/my-workspace");
+        let workspace = ws_path(&env.home, &source, "my-workspace");
         assert!(workspace.exists(), "workspace directory should exist");
         assert!(workspace.join(".git").is_dir(), "workspace should be a git repo");
         assert!(workspace.join("hello.txt").exists(), "files should be cloned");
@@ -100,6 +115,7 @@ mod tests {
         let source = make_git_repo();
         let src = source.path().to_str().unwrap();
 
+        // Auto names are scoped: <source-basename>/agent-1 etc.
         env.cow()
             .args(["create", "--source", src])
             .assert()
@@ -127,7 +143,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/feat-ws");
+        let workspace = ws_path(&env.home, &source, "feat-ws");
         let out = std::process::Command::new("git")
             .args(["branch", "--show-current"])
             .current_dir(&workspace)
@@ -156,7 +172,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/existing-ws");
+        let workspace = ws_path(&env.home, &source, "existing-ws");
         let out = std::process::Command::new("git")
             .args(["branch", "--show-current"])
             .current_dir(&workspace)
@@ -170,8 +186,8 @@ mod tests {
 
     // ─── name-as-branch default (mai-uiz0) ────────────────────────────────────
 
-    fn workspace_branch(home: &std::path::Path, name: &str) -> String {
-        let ws = home.join(format!(".cow/workspaces/{name}"));
+    fn workspace_branch(home: &std::path::Path, source: &TempDir, name: &str) -> String {
+        let ws = ws_path(home, source, name);
         let out = std::process::Command::new("git")
             .args(["branch", "--show-current"])
             .current_dir(&ws)
@@ -190,7 +206,7 @@ mod tests {
             .assert()
             .success();
 
-        assert_eq!(workspace_branch(&env.home, "my-feature"), "my-feature");
+        assert_eq!(workspace_branch(&env.home, &source, "my-feature"), "my-feature");
     }
 
     #[test]
@@ -203,7 +219,7 @@ mod tests {
             .assert()
             .success();
 
-        assert_eq!(workspace_branch(&env.home, "my-feature"), "main");
+        assert_eq!(workspace_branch(&env.home, &source, "my-feature"), "main");
     }
 
     #[test]
@@ -217,7 +233,7 @@ mod tests {
             .success();
 
         // Auto-named workspace (agent-1) should stay on source branch.
-        assert_eq!(workspace_branch(&env.home, "agent-1"), "main");
+        assert_eq!(workspace_branch(&env.home, &source, "agent-1"), "main");
     }
 
     #[test]
@@ -230,7 +246,7 @@ mod tests {
             .assert()
             .success();
 
-        assert_eq!(workspace_branch(&env.home, "my-ws"), "other-branch");
+        assert_eq!(workspace_branch(&env.home, &source, "my-ws"), "other-branch");
     }
 
     #[test]
@@ -260,6 +276,7 @@ mod tests {
 
         env.cow().args(["create", "same-name", "--source", src]).assert().success();
 
+        // Both create calls use the same source, so the scoped name collides.
         env.cow()
             .args(["create", "same-name", "--source", src])
             .assert()
@@ -291,8 +308,8 @@ mod tests {
         let env = Env::new();
         let source = make_git_repo();
 
-        // Pre-create the destination to trigger the "already exists on disk" error
-        let dest = env.home.join(".cow/workspaces/pre-existing");
+        // Pre-create the destination (scoped path) to trigger the "already exists on disk" error.
+        let dest = ws_path(&env.home, &source, "pre-existing");
         std::fs::create_dir_all(&dest).unwrap();
 
         env.cow()
@@ -315,12 +332,12 @@ mod tests {
     }
 
     #[test]
-    fn create_invalid_name_slash() {
+    fn create_invalid_name_multiple_slashes() {
         let env = Env::new();
         let source = make_git_repo();
 
         env.cow()
-            .args(["create", "foo/bar", "--source", source.path().to_str().unwrap()])
+            .args(["create", "foo/bar/baz", "--source", source.path().to_str().unwrap()])
             .assert()
             .failure()
             .stderr(predicate::str::contains("invalid characters"));
@@ -363,7 +380,7 @@ mod tests {
             .success();
 
         // pid file should be removed by the default cleanup
-        assert!(!env.home.join(".cow/workspaces/clean-ws/server.pid").exists());
+        assert!(!ws_path(&env.home, &source, "clean-ws").join("server.pid").exists());
     }
 
     #[test]
@@ -378,7 +395,7 @@ mod tests {
             .success();
 
         // pid file should be kept because --no-clean was passed
-        assert!(env.home.join(".cow/workspaces/noclean-ws/server.pid").exists());
+        assert!(ws_path(&env.home, &source, "noclean-ws").join("server.pid").exists());
     }
 
     #[test]
@@ -397,7 +414,7 @@ mod tests {
             .assert()
             .success();
 
-        assert!(!env.home.join(".cow/workspaces/config-ws/to_delete.txt").exists());
+        assert!(!ws_path(&env.home, &source, "config-ws").join("to_delete.txt").exists());
     }
 
     #[test]
@@ -417,7 +434,7 @@ mod tests {
             .assert()
             .success();
 
-        assert!(!env.home.join(".cow/workspaces/dir-config-ws/to_delete_dir").exists());
+        assert!(!ws_path(&env.home, &source, "dir-config-ws").join("to_delete_dir").exists());
     }
 
     #[test]
@@ -436,7 +453,7 @@ mod tests {
             .success()
             .stdout(predicate::str::contains("Running post-clone"));
 
-        assert!(env.home.join(".cow/workspaces/run-ws/post_clone_ran.txt").exists());
+        assert!(ws_path(&env.home, &source, "run-ws").join("post_clone_ran.txt").exists());
     }
 
     // ─── .cow-context ──────────────────────────────────────────────────────────
@@ -451,13 +468,15 @@ mod tests {
             .assert()
             .success();
 
-        let ctx_path = env.home.join(".cow/workspaces/ctx-ws/.cow-context");
+        let ctx_path = ws_path(&env.home, &source, "ctx-ws").join(".cow-context");
         assert!(ctx_path.exists(), ".cow-context should be written into workspace root");
 
         let content = std::fs::read_to_string(&ctx_path).unwrap();
         let v: serde_json::Value = serde_json::from_str(&content).expect("should be valid JSON");
 
-        assert_eq!(v["name"], "ctx-ws");
+        // Name stored in context file includes the scope prefix.
+        let expected_name = format!("{}/ctx-ws", src_name(&source));
+        assert_eq!(v["name"], expected_name);
         assert_eq!(v["vcs"], "git");
         assert!(v["source"].as_str().is_some());
         assert!(v["branch"].as_str().is_some());
@@ -476,7 +495,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/ctx-clean-ws");
+        let workspace = ws_path(&env.home, &source, "ctx-clean-ws");
         let output = std::process::Command::new("git")
             .args(["status", "--porcelain"])
             .current_dir(&workspace)
@@ -512,8 +531,11 @@ mod tests {
             .filter_map(|e| e["name"].as_str())
             .collect();
 
-        assert!(names.contains(&"list-ws-1"), "expected list-ws-1 in {:?}", names);
-        assert!(names.contains(&"list-ws-2"), "expected list-ws-2 in {:?}", names);
+        let base = src_name(&source);
+        let expected1 = format!("{}/list-ws-1", base);
+        let expected2 = format!("{}/list-ws-2", base);
+        assert!(names.iter().any(|n| *n == expected1), "expected {} in {:?}", expected1, names);
+        assert!(names.iter().any(|n| *n == expected2), "expected {} in {:?}", expected2, names);
     }
 
     #[test]
@@ -531,7 +553,7 @@ mod tests {
             .assert()
             .success()
             .stdout(predicate::str::contains("NAME"))
-            .stdout(predicate::str::contains("SOURCE"))
+            .stdout(predicate::str::contains("STATUS"))
             .stdout(predicate::str::contains("table-ws"));
     }
 
@@ -577,8 +599,10 @@ mod tests {
             .filter_map(|e| e["name"].as_str())
             .collect();
 
-        assert!(names.contains(&"from-s1"));
-        assert!(!names.contains(&"from-s2"), "source filter should exclude from-s2");
+        let scoped1 = format!("{}/from-s1", src_name(&source1));
+        let scoped2 = format!("{}/from-s2", src_name(&source2));
+        assert!(names.iter().any(|n| *n == scoped1), "expected {} in {:?}", scoped1, names);
+        assert!(!names.iter().any(|n| *n == scoped2), "source filter should exclude {}", scoped2);
     }
 
     // ─── remove ────────────────────────────────────────────────────────────────
@@ -593,14 +617,14 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/to-remove");
+        let workspace = ws_path(&env.home, &source, "to-remove");
         assert!(workspace.exists());
 
         env.cow()
-            .args(["remove", "--force", "to-remove"])
+            .args(["remove", "--force", &scoped(&source, "to-remove")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Removed workspace 'to-remove'"));
+            .stdout(predicate::str::contains("to-remove"));
 
         assert!(!workspace.exists(), "workspace directory should be deleted");
     }
@@ -616,15 +640,15 @@ mod tests {
             .success();
 
         // Make the workspace dirty by staging a new file
-        let workspace = env.home.join(".cow/workspaces/dirty-ws");
+        let workspace = ws_path(&env.home, &source, "dirty-ws");
         std::fs::write(workspace.join("change.txt"), "modified").unwrap();
         git(&workspace, &["add", "change.txt"]);
 
         env.cow()
-            .args(["remove", "--force", "dirty-ws"])
+            .args(["remove", "--force", &scoped(&source, "dirty-ws")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Removed workspace 'dirty-ws'"));
+            .stdout(predicate::str::contains("dirty-ws"));
 
         assert!(!workspace.exists(), "workspace should be deleted");
     }
@@ -665,8 +689,8 @@ mod tests {
             .assert()
             .success();
 
-        assert!(!env.home.join(".cow/workspaces/ws-a").exists());
-        assert!(!env.home.join(".cow/workspaces/ws-b").exists());
+        assert!(!ws_path(&env.home, &source, "ws-a").exists());
+        assert!(!ws_path(&env.home, &source, "ws-b").exists());
     }
 
     #[test]
@@ -689,8 +713,8 @@ mod tests {
             .assert()
             .success();
 
-        assert!(!env.home.join(".cow/workspaces/from-s1").exists(), "from-s1 should be removed");
-        assert!(env.home.join(".cow/workspaces/from-s2").exists(), "from-s2 should remain");
+        assert!(!ws_path(&env.home, &source1, "from-s1").exists(), "from-s1 should be removed");
+        assert!(ws_path(&env.home, &source2, "from-s2").exists(), "from-s2 should remain");
     }
 
     #[test]
@@ -720,13 +744,13 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/dirty-keep");
+        let workspace = ws_path(&env.home, &source, "dirty-keep");
         std::fs::write(workspace.join("change.txt"), "modified").unwrap();
         git(&workspace, &["add", "change.txt"]);
 
         // Without --force, non-TTY stdin defaults to "no" → workspace preserved
         env.cow()
-            .args(["remove", "dirty-keep"])
+            .args(["remove", &scoped(&source, "dirty-keep")])
             .assert()
             .success()
             .stderr(predicate::str::contains("Not a TTY"));
@@ -745,7 +769,7 @@ mod tests {
             .success();
 
         // Make the workspace dirty.
-        std::fs::write(env.home.join(".cow/workspaces/list-json-ws/wip.txt"), "wip").unwrap();
+        std::fs::write(ws_path(&env.home, &source, "list-json-ws").join("wip.txt"), "wip").unwrap();
 
         let raw = env.cow()
             .args(["list", "--json"])
@@ -756,9 +780,10 @@ mod tests {
             .clone();
 
         let arr: serde_json::Value = serde_json::from_slice(&raw).expect("valid JSON");
+        let scoped_name = format!("{}/list-json-ws", src_name(&source));
         let ws = arr.as_array().unwrap()
             .iter()
-            .find(|w| w["name"] == "list-json-ws")
+            .find(|w| w["name"] == scoped_name)
             .expect("workspace should appear in list");
 
         assert_eq!(ws["dirty"], true, "dirty flag should be true");
@@ -784,9 +809,10 @@ mod tests {
             .clone();
 
         let arr: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        let scoped_name = format!("{}/list-clean-ws", src_name(&source));
         let ws = arr.as_array().unwrap()
             .iter()
-            .find(|w| w["name"] == "list-clean-ws")
+            .find(|w| w["name"] == scoped_name)
             .unwrap();
 
         assert_eq!(ws["dirty"], false);
@@ -805,7 +831,7 @@ mod tests {
             .success();
 
         env.cow()
-            .args(["status", "status-ws"])
+            .args(["status", &scoped(&source, "status-ws")])
             .assert()
             .success()
             .stdout(predicate::str::contains("status-ws"))
@@ -823,12 +849,12 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/dirty-status");
+        let workspace = ws_path(&env.home, &source, "dirty-status");
         std::fs::write(workspace.join("modified.txt"), "changed content").unwrap();
         git(&workspace, &["add", "modified.txt"]);
 
         env.cow()
-            .args(["status", "dirty-status"])
+            .args(["status", &scoped(&source, "dirty-status")])
             .assert()
             .success()
             .stdout(predicate::str::contains("dirty"))
@@ -846,7 +872,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/cwd-status");
+        let workspace = ws_path(&env.home, &source, "cwd-status");
 
         // Run status with no name but from inside the workspace
         env.cow()
@@ -879,7 +905,7 @@ mod tests {
             .success();
 
         let raw = env.cow()
-            .args(["status", "json-status-ws", "--json"])
+            .args(["status", &scoped(&source, "json-status-ws"), "--json"])
             .assert()
             .success()
             .get_output()
@@ -887,7 +913,7 @@ mod tests {
             .clone();
 
         let v: serde_json::Value = serde_json::from_slice(&raw).expect("should be valid JSON");
-        assert_eq!(v["name"], "json-status-ws");
+        assert_eq!(v["name"], scoped(&source, "json-status-ws"));
         assert_eq!(v["vcs"], "git");
         assert_eq!(v["dirty"], false);
         assert!(v["branch"].as_str().is_some());
@@ -906,11 +932,11 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/json-dirty-ws");
+        let workspace = ws_path(&env.home, &source, "json-dirty-ws");
         std::fs::write(workspace.join("wip.txt"), "work in progress").unwrap();
 
         let raw = env.cow()
-            .args(["status", "json-dirty-ws", "--json"])
+            .args(["status", &scoped(&source, "json-dirty-ws"), "--json"])
             .assert()
             .success()
             .get_output()
@@ -936,7 +962,7 @@ mod tests {
             .success();
 
         env.cow()
-            .args(["diff", "diff-ws"])
+            .args(["diff", &scoped(&source, "diff-ws")])
             .assert()
             .success();
     }
@@ -951,7 +977,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/diff-cwd");
+        let workspace = ws_path(&env.home, &source, "diff-cwd");
 
         env.cow()
             .arg("diff")
@@ -984,7 +1010,7 @@ mod tests {
             .success();
 
         env.cow()
-            .args(["extract", "extract-ws"])
+            .args(["extract", &scoped(&source, "extract-ws")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("--patch"));
@@ -1012,7 +1038,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/patch-ws");
+        let workspace = ws_path(&env.home, &source, "patch-ws");
 
         // Make a commit in the workspace so there's something to patch
         std::fs::write(workspace.join("new_feature.txt"), "feature content").unwrap();
@@ -1022,7 +1048,7 @@ mod tests {
         let patch_file = env.home.join("changes.patch");
 
         env.cow()
-            .args(["extract", "patch-ws", "--patch", patch_file.to_str().unwrap()])
+            .args(["extract", &scoped(&source, "patch-ws"), "--patch", patch_file.to_str().unwrap()])
             .assert()
             .success()
             .stdout(predicate::str::contains("Patch written to"));
@@ -1043,7 +1069,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/branch-ws");
+        let workspace = ws_path(&env.home, &source, "branch-ws");
 
         // Commit something in the workspace so branch-ws diverges from source.
         std::fs::write(workspace.join("feature.txt"), "feature").unwrap();
@@ -1051,7 +1077,7 @@ mod tests {
         git(&workspace, &["commit", "-m", "add feature"]);
 
         env.cow()
-            .args(["extract", "branch-ws", "--branch", "feat/extracted"])
+            .args(["extract", &scoped(&source, "branch-ws"), "--branch", "feat/extracted"])
             .assert()
             .success()
             .stdout(predicate::str::contains("Branch 'feat/extracted' created in source repo"));
@@ -1078,7 +1104,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/sync-ws");
+        let workspace = ws_path(&env.home, &source, "sync-ws");
 
         // Add a commit to source's main after workspace was created.
         std::fs::write(source.path().join("synced.txt"), "from source").unwrap();
@@ -1086,10 +1112,10 @@ mod tests {
         git(source.path(), &["commit", "-m", "source update"]);
 
         env.cow()
-            .args(["sync", "main", "--name", "sync-ws"])
+            .args(["sync", "main", "--name", &scoped(&source, "sync-ws")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Synced 'sync-ws'"));
+            .stdout(predicate::str::contains("sync-ws"));
 
         // The file from source should now be in the workspace.
         assert!(workspace.join("synced.txt").exists(), "synced.txt should exist after sync");
@@ -1105,17 +1131,17 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/merge-ws");
+        let workspace = ws_path(&env.home, &source, "merge-ws");
 
         std::fs::write(source.path().join("merged.txt"), "from source").unwrap();
         git(source.path(), &["add", "merged.txt"]);
         git(source.path(), &["commit", "-m", "source merge update"]);
 
         env.cow()
-            .args(["sync", "main", "--name", "merge-ws", "--merge"])
+            .args(["sync", "main", "--name", &scoped(&source, "merge-ws"), "--merge"])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Synced 'merge-ws'"));
+            .stdout(predicate::str::contains("merge-ws"));
 
         assert!(workspace.join("merged.txt").exists());
     }
@@ -1130,13 +1156,13 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/dirty-sync-ws");
+        let workspace = ws_path(&env.home, &source, "dirty-sync-ws");
 
         // Leave an uncommitted file in the workspace.
         std::fs::write(workspace.join("uncommitted.txt"), "wip").unwrap();
 
         env.cow()
-            .args(["sync", "main", "--name", "dirty-sync-ws"])
+            .args(["sync", "main", "--name", &scoped(&source, "dirty-sync-ws")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("uncommitted changes"));
@@ -1163,7 +1189,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/jj-sync-rebase");
+        let workspace = ws_path(&env.home, &source, "jj-sync-rebase");
 
         // Advance source: add a commit and pin a bookmark to it.
         std::fs::write(source.path().join("new.txt"), "source update").unwrap();
@@ -1172,7 +1198,7 @@ mod tests {
         jj_run(&env.home, source.path(), &["new"]);
 
         env.cow()
-            .args(["sync", "main", "--name", "jj-sync-rebase"])
+            .args(["sync", "main", "--name", &scoped(&source, "jj-sync-rebase")])
             .assert()
             .success()
             .stdout(predicate::str::contains("Synced"));
@@ -1194,13 +1220,13 @@ mod tests {
 
         // Write a file without describing — workspace is now dirty.
         std::fs::write(
-            env.home.join(".cow/workspaces/jj-sync-dirty/dirty.txt"),
+            ws_path(&env.home, &source, "jj-sync-dirty").join("dirty.txt"),
             "uncommitted",
         )
         .unwrap();
 
         env.cow()
-            .args(["sync", "main", "--name", "jj-sync-dirty"])
+            .args(["sync", "main", "--name", &scoped(&source, "jj-sync-dirty")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("uncommitted changes"));
@@ -1218,7 +1244,7 @@ mod tests {
 
         // No source_branch arg — should bail with a helpful message.
         env.cow()
-            .args(["sync", "--name", "jj-sync-nobranch"])
+            .args(["sync", "--name", &scoped(&source, "jj-sync-nobranch")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("source branch explicitly"));
@@ -1236,7 +1262,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/nobranch-ws");
+        let workspace = ws_path(&env.home, &source, "nobranch-ws");
 
         // Advance source's main.
         std::fs::write(source.path().join("default_sync.txt"), "default").unwrap();
@@ -1245,10 +1271,10 @@ mod tests {
 
         // Sync without specifying a branch — should default to workspace's current branch (main).
         env.cow()
-            .args(["sync", "--name", "nobranch-ws"])
+            .args(["sync", "--name", &scoped(&source, "nobranch-ws")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Synced 'nobranch-ws'"));
+            .stdout(predicate::str::contains("nobranch-ws"));
 
         assert!(workspace.join("default_sync.txt").exists());
     }
@@ -1264,7 +1290,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/cwd-sync-ws");
+        let workspace = ws_path(&env.home, &source, "cwd-sync-ws");
 
         std::fs::write(source.path().join("cwd_synced.txt"), "cwd").unwrap();
         git(source.path(), &["add", "cwd_synced.txt"]);
@@ -1276,7 +1302,7 @@ mod tests {
             .current_dir(&workspace)
             .assert()
             .success()
-            .stdout(predicate::str::contains("Synced 'cwd-sync-ws'"));
+            .stdout(predicate::str::contains(&scoped(&source, "cwd-sync-ws")));
 
         assert!(workspace.join("cwd_synced.txt").exists());
     }
@@ -1309,7 +1335,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["sync", "main", "--name", "fetch-err-ws"])
+            .args(["sync", "main", "--name", &scoped(&source, "fetch-err-ws")])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -1349,7 +1375,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["sync", "main", "--name", "rebase-err-ws"])
+            .args(["sync", "main", "--name", &scoped(&source, "rebase-err-ws")])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -1368,7 +1394,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/conflict-ws");
+        let workspace = ws_path(&env.home, &source, "conflict-ws");
 
         // Workspace modifies hello.txt and commits.
         std::fs::write(workspace.join("hello.txt"), "workspace version").unwrap();
@@ -1381,7 +1407,7 @@ mod tests {
         git(source.path(), &["commit", "-m", "source change"]);
 
         env.cow()
-            .args(["sync", "main", "--name", "conflict-ws"])
+            .args(["sync", "main", "--name", &scoped(&source, "conflict-ws")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("conflict"));
@@ -1403,10 +1429,10 @@ mod tests {
             .assert()
             .success();
 
-        let expected = env.home.join(".cow/workspaces/cd-ws");
+        let expected = ws_path(&env.home, &source, "cd-ws");
 
         let raw = env.cow()
-            .args(["cd", "cd-ws"])
+            .args(["cd", &scoped(&source, "cd-ws")])
             .assert()
             .success()
             .get_output()
@@ -1662,7 +1688,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/to-mcp-remove");
+        let workspace = ws_path(&env.home, &source, "to-mcp-remove");
         assert!(workspace.exists());
 
         let req = serde_json::json!({
@@ -1672,7 +1698,7 @@ mod tests {
             "params": {
                 "name": "cow_remove",
                 "arguments": {
-                    "names": ["to-mcp-remove"]
+                    "names": [scoped(&source, "to-mcp-remove")]
                 }
             }
         });
@@ -1710,7 +1736,7 @@ mod tests {
             "params": {
                 "name": "cow_status",
                 "arguments": {
-                    "name": "mcp-status-ws"
+                    "name": scoped(&source, "mcp-status-ws")
                 }
             }
         });
@@ -1745,7 +1771,7 @@ mod tests {
             .current_dir(source.path())
             .assert()
             .success()
-            .stdout(predicate::str::contains("Created workspace 'cwd-src-ws'"));
+            .stdout(predicate::str::contains("cwd-src-ws"));
     }
 
     #[test]
@@ -1839,7 +1865,7 @@ mod tests {
         ).unwrap();
         assert_eq!(resp["result"]["isError"], false);
 
-        let workspace = env.home.join(".cow/workspaces/branch-ws");
+        let workspace = ws_path(&env.home, &source, "branch-ws");
         let out = std::process::Command::new("git")
             .args(["branch", "--show-current"])
             .current_dir(&workspace)
@@ -1961,8 +1987,8 @@ mod tests {
             String::from_utf8_lossy(&raw).trim()
         ).unwrap();
         assert_eq!(resp["result"]["isError"], false);
-        assert!(!env.home.join(".cow/workspaces/all-a").exists());
-        assert!(!env.home.join(".cow/workspaces/all-b").exists());
+        assert!(!ws_path(&env.home, &source, "all-a").exists());
+        assert!(!ws_path(&env.home, &source, "all-b").exists());
     }
 
     #[test]
@@ -2006,8 +2032,8 @@ mod tests {
             String::from_utf8_lossy(&raw).trim()
         ).unwrap();
         assert_eq!(resp["result"]["isError"], false);
-        assert!(!env.home.join(".cow/workspaces/del-ws").exists());
-        assert!(env.home.join(".cow/workspaces/keep-ws").exists());
+        assert!(!ws_path(&env.home, &source1, "del-ws").exists());
+        assert!(ws_path(&env.home, &source2, "keep-ws").exists());
     }
 
     #[test]
@@ -2076,7 +2102,7 @@ mod tests {
             .assert()
             .success();
 
-        let ws = env.home.join(".cow/workspaces/push-ws");
+        let ws = ws_path(&env.home, &source, "push-ws");
         add_origin_remote(&ws, bare.path());
 
         // Make a commit in the workspace that is NOT on origin.
@@ -2086,7 +2112,7 @@ mod tests {
 
         // --force should remove without prompting, but warn about unpushed commits.
         env.cow()
-            .args(["remove", "--force", "push-ws"])
+            .args(["remove", "--force", &scoped(&source, "push-ws")])
             .assert()
             .success()
             .stderr(predicate::str::contains("unpushed"))
@@ -2105,7 +2131,7 @@ mod tests {
             .assert()
             .success();
 
-        let ws = env.home.join(".cow/workspaces/push-warn-ws");
+        let ws = ws_path(&env.home, &source, "push-warn-ws");
         add_origin_remote(&ws, bare.path());
 
         std::fs::write(ws.join("new.txt"), "new").unwrap();
@@ -2114,7 +2140,7 @@ mod tests {
 
         // Non-TTY stdin: should warn on stderr and proceed with removal.
         env.cow()
-            .args(["remove", "push-warn-ws"])
+            .args(["remove", &scoped(&source, "push-warn-ws")])
             .assert()
             .success()
             .stderr(predicate::str::contains("unpushed"))
@@ -2133,12 +2159,12 @@ mod tests {
             .assert()
             .success();
 
-        let ws = env.home.join(".cow/workspaces/synced-ws");
+        let ws = ws_path(&env.home, &source, "synced-ws");
         add_origin_remote(&ws, bare.path());
 
         // Nothing committed after push → zero unpushed commits.
         env.cow()
-            .args(["remove", "--force", "synced-ws"])
+            .args(["remove", "--force", &scoped(&source, "synced-ws")])
             .assert()
             .success()
             .stdout(predicate::str::contains("Removed workspace"));
@@ -2213,10 +2239,10 @@ mod tests {
             .args(["create", "jj-ws", "--source", source.path().to_str().unwrap()])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Created workspace 'jj-ws'"));
+            .stdout(predicate::str::contains("jj-ws"));
 
-        assert!(env.home.join(".cow/workspaces/jj-ws").exists());
-        assert!(env.home.join(".cow/workspaces/jj-ws/.jj").exists());
+        assert!(ws_path(&env.home, &source, "jj-ws").exists());
+        assert!(ws_path(&env.home, &source, "jj-ws").join(".jj").exists());
     }
 
     #[test]
@@ -2248,7 +2274,7 @@ mod tests {
             .success();
 
         env.cow()
-            .args(["status", "jj-status"])
+            .args(["status", &scoped(&source, "jj-status")])
             .assert()
             .success()
             .stdout(predicate::str::contains("VCS:        jj"))
@@ -2267,13 +2293,13 @@ mod tests {
 
         // Modify a tracked file to make the working copy dirty.
         std::fs::write(
-            env.home.join(".cow/workspaces/jj-dirty/hello.txt"),
+            ws_path(&env.home, &source, "jj-dirty").join("hello.txt"),
             "modified content",
         )
         .unwrap();
 
         env.cow()
-            .args(["status", "jj-dirty"])
+            .args(["status", &scoped(&source, "jj-dirty")])
             .assert()
             .success()
             .stdout(predicate::str::contains("Status:     dirty"));
@@ -2291,12 +2317,12 @@ mod tests {
 
         // Modify a file so there is something to show.
         std::fs::write(
-            env.home.join(".cow/workspaces/jj-diff/hello.txt"),
+            ws_path(&env.home, &source, "jj-diff").join("hello.txt"),
             "modified",
         )
         .unwrap();
 
-        env.cow().args(["diff", "jj-diff"]).assert().success();
+        env.cow().args(["diff", &scoped(&source, "jj-diff")]).assert().success();
     }
 
     #[test]
@@ -2310,12 +2336,12 @@ mod tests {
             .success();
 
         env.cow()
-            .args(["remove", "--force", "jj-remove"])
+            .args(["remove", "--force", &scoped(&source, "jj-remove")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Removed workspace 'jj-remove'"));
+            .stdout(predicate::str::contains("jj-remove"));
 
-        assert!(!env.home.join(".cow/workspaces/jj-remove").exists());
+        assert!(!ws_path(&env.home, &source, "jj-remove").exists());
     }
 
     #[test]
@@ -2330,13 +2356,13 @@ mod tests {
 
         // Make the workspace dirty.
         std::fs::write(
-            env.home.join(".cow/workspaces/jj-dirty-rm/hello.txt"),
+            ws_path(&env.home, &source, "jj-dirty-rm").join("hello.txt"),
             "changed",
         )
         .unwrap();
 
         env.cow()
-            .args(["remove", "--force", "jj-dirty-rm"])
+            .args(["remove", "--force", &scoped(&source, "jj-dirty-rm")])
             .assert()
             .success()
             .stderr(predicate::str::contains("has modifications"))
@@ -2355,7 +2381,7 @@ mod tests {
 
         // Add a change so the patch is non-empty.
         std::fs::write(
-            env.home.join(".cow/workspaces/jj-patch/hello.txt"),
+            ws_path(&env.home, &source, "jj-patch").join("hello.txt"),
             "patched content",
         )
         .unwrap();
@@ -2364,7 +2390,7 @@ mod tests {
         env.cow()
             .args([
                 "extract",
-                "jj-patch",
+                &scoped(&source, "jj-patch"),
                 "--patch",
                 patch_file.to_str().unwrap(),
             ])
@@ -2385,7 +2411,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/jj-branch");
+        let workspace = ws_path(&env.home, &source, "jj-branch");
 
         // Make a change in the workspace and commit it with jj.
         std::fs::write(workspace.join("feature.txt"), "feature content").unwrap();
@@ -2393,7 +2419,7 @@ mod tests {
         jj_run(&env.home, &workspace, &["new"]);
 
         env.cow()
-            .args(["extract", "jj-branch", "--branch", "my-feature"])
+            .args(["extract", &scoped(&source, "jj-branch"), "--branch", "my-feature"])
             .assert()
             .success()
             .stdout(predicate::str::contains("Branch 'my-feature' created in source repo"));
@@ -2463,7 +2489,7 @@ mod tests {
 
         // Add an untracked file to make the workspace dirty.
         std::fs::write(
-            env.home.join(".cow/workspaces/dirty-list-ws/untracked.txt"),
+            ws_path(&env.home, &source, "dirty-list-ws").join("untracked.txt"),
             "new file",
         )
         .unwrap();
@@ -2488,12 +2514,12 @@ mod tests {
         // Without --force on a jj workspace, confirm_or_default is called.
         // Non-TTY stdin defaults to no → workspace is NOT removed.
         env.cow()
-            .args(["remove", "jj-no-force"])
+            .args(["remove", &scoped(&source, "jj-no-force")])
             .assert()
             .success()
             .stdout(predicate::str::contains("No workspaces were removed"));
 
-        assert!(env.home.join(".cow/workspaces/jj-no-force").exists());
+        assert!(ws_path(&env.home, &source, "jj-no-force").exists());
     }
 
     #[test]
@@ -2522,7 +2548,7 @@ mod tests {
             ])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Created workspace 'jj-with-change'"));
+            .stdout(predicate::str::contains("jj-with-change"));
     }
 
     #[test]
@@ -2572,7 +2598,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["diff", "diff-fail-ws"])
+            .args(["diff", &scoped(&source, "diff-fail-ws")])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -2608,7 +2634,7 @@ mod tests {
 
         let patch_file = env.home.join("fail.patch");
         env.cow()
-            .args(["extract", "jj-patch-fail", "--patch", patch_file.to_str().unwrap()])
+            .args(["extract", &scoped(&source, "jj-patch-fail"), "--patch", patch_file.to_str().unwrap()])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -2643,7 +2669,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["extract", "fetch-fail-ws", "--branch", "feature-branch"])
+            .args(["extract", &scoped(&source, "fetch-fail-ws"), "--branch", "feature-branch"])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -2705,7 +2731,7 @@ mod tests {
             "params": {
                 "name": "cow_sync",
                 "arguments": {
-                    "name": "mcp-sync-ws",
+                    "name": scoped(&source, "mcp-sync-ws"),
                     "source_branch": "main"
                 }
             }
@@ -2724,7 +2750,7 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false);
         assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("Synced"));
 
-        let workspace = env.home.join(".cow/workspaces/mcp-sync-ws");
+        let workspace = ws_path(&env.home, &source, "mcp-sync-ws");
         assert!(workspace.join("mcp_synced.txt").exists());
     }
 
@@ -2738,7 +2764,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/mcp-extract-ws");
+        let workspace = ws_path(&env.home, &source, "mcp-extract-ws");
         std::fs::write(workspace.join("mcp_feature.txt"), "feature").unwrap();
         git(&workspace, &["add", "mcp_feature.txt"]);
         git(&workspace, &["commit", "-m", "add feature"]);
@@ -2750,7 +2776,7 @@ mod tests {
             "params": {
                 "name": "cow_extract",
                 "arguments": {
-                    "name": "mcp-extract-ws",
+                    "name": scoped(&source, "mcp-extract-ws"),
                     "branch": "mcp-feature-branch"
                 }
             }
@@ -2788,7 +2814,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/mcp-patch-ws");
+        let workspace = ws_path(&env.home, &source, "mcp-patch-ws");
         std::fs::write(workspace.join("patch_feature.txt"), "patch feature").unwrap();
         git(&workspace, &["add", "patch_feature.txt"]);
         git(&workspace, &["commit", "-m", "add patch feature"]);
@@ -2802,7 +2828,7 @@ mod tests {
             "params": {
                 "name": "cow_extract",
                 "arguments": {
-                    "name": "mcp-patch-ws",
+                    "name": scoped(&source, "mcp-patch-ws"),
                     "patch": patch_path.to_str().unwrap()
                 }
             }
@@ -2844,7 +2870,7 @@ mod tests {
             "params": {
                 "name": "cow_sync",
                 "arguments": {
-                    "name": "mcp-merge-ws",
+                    "name": scoped(&source, "mcp-merge-ws"),
                     "source_branch": "main",
                     "merge": true
                 }
@@ -2862,7 +2888,7 @@ mod tests {
 
         let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
         assert_eq!(resp["result"]["isError"], false);
-        assert!(env.home.join(".cow/workspaces/mcp-merge-ws/mcp_merge.txt").exists());
+        assert!(ws_path(&env.home, &source, "mcp-merge-ws").join("mcp_merge.txt").exists());
     }
 
     #[test]
@@ -2882,7 +2908,7 @@ mod tests {
             "method": "tools/call",
             "params": {
                 "name": "cow_extract",
-                "arguments": { "name": "mcp-noflag-ws" }
+                "arguments": { "name": scoped(&source, "mcp-noflag-ws") }
             }
         });
 
@@ -3135,7 +3161,7 @@ mod tests {
             .failure();
 
         // The workspace directory must not exist after failure.
-        let dest = env.home.join(".cow/workspaces/rollback-ws");
+        let dest = ws_path(&env.home, &source, "rollback-ws");
         assert!(!dest.exists(), "dest dir should be removed after failed create");
 
         // Nothing should be registered in state.
@@ -3156,7 +3182,7 @@ mod tests {
             .assert()
             .success();
 
-        let dest = env.home.join(".cow/workspaces/good-ws");
+        let dest = ws_path(&env.home, &source, "good-ws");
         assert!(dest.exists(), "dest dir should exist after successful create");
     }
 
@@ -3182,7 +3208,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/pruned-ws");
+        let workspace = ws_path(&env.home, &source, "pruned-ws");
 
         // git worktree list should show only 1 entry (the workspace itself).
         // Without pruning the clone inherits the stale entry, giving 2 entries.
@@ -3200,10 +3226,10 @@ mod tests {
     // ─── list: path display ──────────────────────────────────────────────────
 
     #[test]
-    fn list_source_path_contracts_home_dir() {
+    fn list_source_basename_appears_in_scoped_name() {
         let env = Env::new();
 
-        // Create the source repo inside the fake HOME so it qualifies for ~ contraction.
+        // Create the source repo inside the fake HOME with a recognisable name.
         let source = env.home.join("projects/myrepo");
         std::fs::create_dir_all(&source).unwrap();
         git(&source, &["init", "-b", "main"]);
@@ -3220,14 +3246,12 @@ mod tests {
             .assert()
             .success();
 
+        // The scoped name `myrepo/home-ws` should appear in the list output.
         env.cow()
             .args(["list"])
             .assert()
             .success()
-            // contracted path visible
-            .stdout(predicate::str::contains("~/projects/myrepo"))
-            // full absolute home path must NOT appear
-            .stdout(predicate::str::contains(env.home.display().to_string()).not());
+            .stdout(predicate::str::contains("myrepo/home-ws"));
     }
 
     // ─── create: output messages ─────────────────────────────────────────────
@@ -3241,7 +3265,9 @@ mod tests {
             .args(["create", "hint-ws", "--source", source.path().to_str().unwrap()])
             .assert()
             .success()
-            .stdout(predicate::str::contains("cow remove hint-ws"));
+            // The remove hint includes the scoped name (e.g., ".tmpXXX/hint-ws").
+            .stdout(predicate::str::contains("cow remove"))
+            .stdout(predicate::str::contains("hint-ws"));
     }
 
     #[test]
@@ -3283,17 +3309,17 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/dirty-yes");
+        let workspace = ws_path(&env.home, &source, "dirty-yes");
         std::fs::write(workspace.join("change.txt"), "modified").unwrap();
         git(&workspace, &["add", "change.txt"]);
 
         // --yes should skip the "remove anyway?" prompt but still print the warning
         env.cow()
-            .args(["remove", "--yes", "dirty-yes"])
+            .args(["remove", "--yes", &scoped(&source, "dirty-yes")])
             .assert()
             .success()
             .stderr(predicate::str::contains("uncommitted changes"))
-            .stdout(predicate::str::contains("Removed workspace 'dirty-yes'"));
+            .stdout(predicate::str::contains("dirty-yes"));
 
         assert!(!workspace.exists(), "workspace should be deleted");
     }
@@ -3330,7 +3356,7 @@ mod tests {
             .assert()
             .success();
 
-        let workspace = env.home.join(".cow/workspaces/count-ws");
+        let workspace = ws_path(&env.home, &source, "count-ws");
         std::fs::write(workspace.join("a.txt"), "a").unwrap();
         std::fs::write(workspace.join("b.txt"), "b").unwrap();
         git(&workspace, &["add", "a.txt", "b.txt"]);
@@ -3340,5 +3366,82 @@ mod tests {
             .assert()
             .success()
             .stdout(predicate::str::contains("dirty (2)"));
+    }
+
+    // ─── scoped name tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn create_name_is_auto_scoped() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "feature-x", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let expected_name = scoped(&source, "feature-x");
+        let dest = ws_path(&env.home, &source, "feature-x");
+        assert!(dest.exists(), "scoped workspace path should exist");
+
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains(&expected_name));
+    }
+
+    #[test]
+    fn create_scoped_name_explicit() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "other/feature-x", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Explicit scoped name used as-is — path is under "other/feature-x"
+        let dest = env.home.join(".cow/workspaces/other/feature-x");
+        assert!(dest.exists(), "explicitly scoped workspace path should exist");
+
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("other/feature-x"));
+    }
+
+    #[test]
+    fn create_different_sources_same_branch_no_collision() {
+        let env = Env::new();
+        let source_a = make_git_repo();
+        let source_b = make_git_repo();
+
+        env.cow()
+            .args(["create", "develop", "--source", source_a.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["create", "develop", "--source", source_b.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Both workspaces should exist under their own scoped paths
+        assert!(ws_path(&env.home, &source_a, "develop").exists(), "source_a/develop should exist");
+        assert!(ws_path(&env.home, &source_b, "develop").exists(), "source_b/develop should exist");
+
+        // List should contain both scoped names
+        let out = env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let list = String::from_utf8_lossy(&out);
+        assert!(list.contains(&scoped(&source_a, "develop")));
+        assert!(list.contains(&scoped(&source_b, "develop")));
     }
 }

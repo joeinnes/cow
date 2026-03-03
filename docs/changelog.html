@@ -346,17 +346,42 @@
       <div class="release">
         <div class="release-meta">
           <span class="release-version">v0.1.4</span>
-          <span class="release-date">unreleased</span>
+          <span class="release-date">2026-03-04</span>
           <span class="release-tag feature">quality of life</span>
         </div>
         <div class="release-body">
-          <h2>Better automation and jj ergonomics.</h2>
+          <h2>Scoped workspace names and better automation.</h2>
           <p class="lead">
+            Workspace names are now scoped by source repository — <code>feature-x</code>
+            becomes <code>brightblur/feature-x</code> automatically. <code>cow list</code>
+            drops the SOURCE column (it's encoded in the name) and gets a cleaner layout.
             Adds flags for scripting and non-TTY use: <code>--print-path</code> on create,
-            <code>-y/--yes</code> on remove, and <code>-m/--message</code> to set the initial
-            jj change description in one step. <code>cow list</code> now shows a file count
-            alongside dirty workspaces.
+            <code>-y/--yes</code> on remove, and <code>-m/--message</code> for jj.
           </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Workspace naming</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                Names are automatically scoped by source repository basename:
+                <code>cow create feature-x --source ~/repos/brightblur</code> stores the
+                workspace as <code>brightblur/feature-x</code>. Supply an explicit
+                <code>scope/name</code> to override.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                Auto-generated names follow the same pattern:
+                <code>brightblur/agent-1</code>, <code>brightblur/agent-2</code>, etc.
+              </li>
+              <li>
+                <span class="tag feat">feat</span>
+                <code>cow list</code> redesigned — SOURCE column removed (source is now
+                encoded in the scoped name). Branch column only appears when the branch
+                differs from the workspace name suffix.
+              </li>
+            </ul>
+          </div>
 
           <div class="change-group">
             <span class="change-group-label">New flags</span>

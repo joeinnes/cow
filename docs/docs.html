@@ -401,7 +401,7 @@
       <!-- create -->
       <div class="cmd-block" id="cmd-create">
         <h3 class="cmd-sig"><code>cow create [OPTIONS] [NAME]</code></h3>
-        <p class="cmd-desc">Create a new workspace from a repository using APFS copy-on-write. When a name is given it is also used as the branch name (created if it does not exist). Omit the name and cow auto-generates <code>agent-1</code>, <code>agent-2</code>, and so on.</p>
+        <p class="cmd-desc">Create a new workspace from a repository using APFS copy-on-write. Names are automatically scoped by source repository: <code>feature-x</code> becomes <code>brightblur/feature-x</code>. Omit the name and cow auto-generates <code>brightblur/agent-1</code>, <code>brightblur/agent-2</code>, and so on. Supply an explicit <code>scope/name</code> to override the default scope.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
@@ -424,7 +424,7 @@
       <!-- list -->
       <div class="cmd-block" id="cmd-list">
         <h3 class="cmd-sig"><code>cow list [OPTIONS]</code></h3>
-        <p class="cmd-desc">List all active workspaces managed by cow, showing their name, source repository, branch, VCS, and creation time.</p>
+        <p class="cmd-desc">List all active workspaces managed by cow. Names are shown in <code>source/workspace</code> form. The branch column is omitted when the branch matches the workspace name. Status shows <code>dirty (N)</code> with a file count.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>

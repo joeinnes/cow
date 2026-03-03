@@ -28,7 +28,7 @@ pub fn run(args: SyncArgs) -> Result<()> {
         let source_branch = source_branch_opt
             .context("Cannot determine jj workspace branch; pass a source branch explicitly.")?;
 
-        let remote_name = format!("_cow_sync_{}", name);
+        let remote_name = format!("_cow_sync_{}", name.replace('/', "-"));
 
         let add_status = Command::new("jj")
             .args(["git", "remote", "add", &remote_name, entry.source.to_str().unwrap()])
@@ -89,7 +89,7 @@ pub fn run(args: SyncArgs) -> Result<()> {
             .context("Cannot determine workspace branch; pass a source branch explicitly.")?,
     };
 
-    let remote_name = format!("_cow_sync_{}", name);
+    let remote_name = format!("_cow_sync_{}", name.replace('/', "-"));
 
     // Register source repo as a temporary remote in the workspace.
     let add_status = Command::new("git")
