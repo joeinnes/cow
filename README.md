@@ -237,3 +237,21 @@ Add a `.cow.json` to your repo to define project-specific cleanup:
 - Git submodules are not tested and may not work correctly.
 - The source must be a primary git repo, not a git worktree.
 - `cow sync` and `cow extract --branch` are not yet supported for jj workspaces.
+
+## Development
+
+### Test coverage
+
+`cargo tarpaulin` reports ~90% overall coverage. `src/commands/migrate.rs` sits lower (~72%) for three verified reasons:
+
+**1. jj code paths require a live jj repo**
+
+`discover_jj_workspaces`, the `JjWorkspace` arm of `migrate_candidate`, the jj secondary-workspace guard in `run()`, and the `Some(Vcs::Jj)` branch in `discover_orphaned` all require an actual jj repository with secondary workspaces configured. These paths are annotated with `// tarpaulin-ignore-start/end` but may still appear in the uncovered-lines report depending on the tarpaulin version — the annotations suppress them from the hit/miss ratio but not always from the "Uncovered Lines" list.
+
+**2. Integration tests run as subprocesses**
+
+The eight integration tests for `migrate` invoke the compiled `cow` binary as a child process via `assert_cmd`. tarpaulin instruments the test binary, not the spawned process, so lines that are exercised exclusively through integration tests (e.g. the CWD-default source path, `write_context_file_git`, and the orphaned-workspace registration path in `migrate_candidate`) do not appear as covered. This is a known limitation of tarpaulin's instrumentation model; the paths are genuinely tested, just not visible to the coverage tool.
+
+**3. Defensive error paths**
+
+Several `bail!` branches guard against conditions that are difficult to trigger in automated tests: `clonefile(2)` returning an error, `git worktree remove` failing after a successful migration, a destination directory appearing between the exists-check and the clone call, and a name collision in state. These are not covered by any current test.
