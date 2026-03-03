@@ -55,8 +55,11 @@ Create a new workspace from a repository using APFS CoW. When a name is given it
 | `--branch <BRANCH>` | Override the branch name (default: workspace name) |
 | `--no-branch` | Do not switch or create a branch |
 | `--change <CHANGE>` | jj change to edit in the new workspace |
+| `--from <REV>` | jj revision to branch from (creates a new change on top) |
 | `--dir <PATH>` | Parent directory for workspaces (default: `~/.cow/workspaces/`) |
 | `--no-clean` | Skip post-clone cleanup of runtime artefacts |
+| `-m, --message <MSG>` | Set the initial jj change description (jj repos only) |
+| `--print-path` | Print only the workspace path on stdout (for scripting) |
 
 ### `cow list [OPTIONS]`
 
@@ -90,7 +93,8 @@ Remove one or more workspaces. Warns before removing workspaces with uncommitted
 
 | Option | Description |
 |--------|-------------|
-| `--force` | Skip dirty-state warnings and prompts |
+| `--force` | Skip dirty-state warnings and remove without prompting |
+| `-y, --yes` | Skip confirmation prompts (still shows dirty warnings) |
 | `--all` | Remove all workspaces |
 | `--source <PATH>` | Scope `--all` to this source |
 

@@ -342,6 +342,61 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.4 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.4</span>
+          <span class="release-date">unreleased</span>
+          <span class="release-tag feature">quality of life</span>
+        </div>
+        <div class="release-body">
+          <h2>Better automation and jj ergonomics.</h2>
+          <p class="lead">
+            Adds flags for scripting and non-TTY use: <code>--print-path</code> on create,
+            <code>-y/--yes</code> on remove, and <code>-m/--message</code> to set the initial
+            jj change description in one step. <code>cow list</code> now shows a file count
+            alongside dirty workspaces.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">New flags</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                <code>cow create --print-path</code> — suppress all output except the final
+                workspace path, making it easy to capture in scripts:
+                <code>WS=$(cow create my-feature --print-path)</code>.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow create -m/--message &lt;MSG&gt;</code> — set the initial jj change
+                description immediately after workspace creation. Removes the separate
+                <code>jj describe</code> step (jj repos only).
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow remove -y/--yes</code> — skip confirmation prompts without implying
+                a safety override. Unlike <code>--force</code> (which bypasses dirty checks),
+                <code>--yes</code> still shows dirty warnings — it just doesn't wait for input.
+                Idiomatic for scripts and non-TTY contexts.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Improvements</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag feat">feat</span>
+                <code>cow list</code> now shows a file count next to dirty workspaces
+                (e.g. <code>dirty (3)</code>), giving a quick sense of change scope without
+                running <code>cow status</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.3 -->
       <div class="release">
         <div class="release-meta">

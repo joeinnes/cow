@@ -409,8 +409,11 @@
             <tr><td><code>--branch &lt;BRANCH&gt;</code></td><td>Override the branch name (default: same as workspace name)</td></tr>
             <tr><td><code>--no-branch</code></td><td>Do not switch or create a branch after cloning</td></tr>
             <tr><td><code>--change &lt;CHANGE&gt;</code></td><td>jj change ID to edit in the new workspace (jj repos only)</td></tr>
+            <tr><td><code>--from &lt;REV&gt;</code></td><td>jj revision to branch from — creates a new change on top rather than editing directly (jj repos only)</td></tr>
+            <tr><td><code>-m, --message &lt;MSG&gt;</code></td><td>Set the initial jj change description immediately after creation (jj repos only)</td></tr>
             <tr><td><code>--dir &lt;PATH&gt;</code></td><td>Parent directory for workspaces (default: <code>~/.cow/workspaces/</code>)</td></tr>
             <tr><td><code>--no-clean</code></td><td>Skip post-clone cleanup of runtime artefacts (<code>.pid</code>, <code>.sock</code>, etc.)</td></tr>
+            <tr><td><code>--print-path</code></td><td>Print only the workspace path on stdout after creation, suppressing all other output — useful for scripting and automation</td></tr>
           </tbody>
         </table>
         <div class="cmd-note">
@@ -467,6 +470,7 @@
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>--force</code></td><td>Skip dirty-state warnings and remove without prompting</td></tr>
+            <tr><td><code>-y, --yes</code></td><td>Skip confirmation prompts without implying a safety override — dirty warnings are still shown</td></tr>
             <tr><td><code>--all</code></td><td>Remove all workspaces (can be scoped with <code>--source</code>)</td></tr>
             <tr><td><code>--source &lt;PATH&gt;</code></td><td>Scope <code>--all</code> to workspaces from this source repository</td></tr>
           </tbody>
