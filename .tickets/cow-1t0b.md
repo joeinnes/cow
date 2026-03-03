@@ -1,6 +1,6 @@
 ---
 id: cow-1t0b
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-03T16:50:00Z
