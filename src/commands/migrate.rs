@@ -76,7 +76,10 @@ pub fn run(args: MigrateArgs) -> Result<()> {
     let mut any_migrated = false;
 
     for candidate in &candidates {
-        if candidate.is_dirty && !args.force {
+        // Orphaned workspaces are registered in-place (non-destructive), so
+        // the dirty check does not apply to them.
+        let requires_dirty_check = candidate.kind != CandidateKind::Orphaned;
+        if requires_dirty_check && candidate.is_dirty && !args.force {
             println!(
                 "Skipping '{}' — has uncommitted changes (use --force to override).",
                 candidate.name
