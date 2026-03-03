@@ -115,6 +115,45 @@ Fetch the latest commits from the source repository and rebase the workspace ont
 | `--merge` | Merge instead of rebase |
 | `--name <NAME>` | Target a named workspace instead of detecting from cwd |
 
+### `cow migrate [OPTIONS]`
+
+Discover existing git linked worktrees, jj secondary workspaces, and orphaned cow workspace directories for a source repository, and migrate each one into a proper cow-managed APFS clone workspace.
+
+Useful when you have been using `git worktree` or `jj workspace add` directly and want to bring those workspaces under cow management without starting over.
+
+| Option | Description |
+|--------|-------------|
+| `--source <PATH>` | Source repo (default: current directory) |
+| `--all` | Migrate all discovered candidates |
+| `--force` | Migrate dirty workspaces (those with uncommitted changes) |
+| `--dry-run` | Print what would happen without making any changes |
+
+Without `--all`, the command lists discovered candidates and exits — nothing is modified.
+
+**What each candidate type does:**
+
+| Type | Action |
+|------|--------|
+| git linked worktree | APFS clone source, check out the same branch, remove old worktree |
+| jj secondary workspace | `jj workspace add` at new location, forget old workspace |
+| Orphaned cow directory | Register in state as-is (no clone, non-destructive) |
+
+Dirty candidates (uncommitted changes) are skipped unless `--force` is passed. Orphaned directories are always registered regardless of dirty status, since registration is non-destructive.
+
+```sh
+# See what would be migrated
+cow migrate --source ~/repos/myapp
+
+# Migrate everything (skip dirty ones)
+cow migrate --source ~/repos/myapp --all
+
+# Migrate everything including dirty workspaces
+cow migrate --source ~/repos/myapp --all --force
+
+# Preview without making changes
+cow migrate --source ~/repos/myapp --all --dry-run
+```
+
 ### `cow mcp`
 
 Run as a [Model Context Protocol](https://modelcontextprotocol.io) stdio server. Exposes `cow_create`, `cow_list`, `cow_remove`, `cow_status`, and `cow_diff` as MCP tools so agents can manage workspaces without human intervention.
