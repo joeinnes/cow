@@ -107,7 +107,9 @@ pub fn run(args: CreateArgs) -> Result<()> {
         .with_context(|| format!("Failed to create workspace directory: {}", workspace_dir.display()))?;
 
     // CoW clone
-    println!("Cloning {} ...", source.display());
+    if !args.print_path {
+        println!("Cloning {} ...", source.display());
+    }
     cow_clone(&source, &dest, &detected_vcs)?;
 
     // All post-clone steps. If any fail the clone is rolled back so the user
@@ -119,6 +121,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
         branch_arg.as_deref(),
         args.change.as_deref(),
         args.from.as_deref(),
+        args.message.as_deref(),
         args.no_clean,
         &name,
         &mut state,
@@ -130,14 +133,18 @@ pub fn run(args: CreateArgs) -> Result<()> {
         return setup_result;
     }
 
-    let has_cow_json = source.join(".cow.json").exists();
-    println!("Created workspace '{}' at {}", name, dest.display());
-    println!("To remove: cow remove {}", name);
-    if !has_cow_json {
-        println!(
-            "Tip: add a .cow.json to remove stale build dirs or run post-clone setup. \
-             See the README for details."
-        );
+    if args.print_path {
+        println!("{}", dest.display());
+    } else {
+        let has_cow_json = source.join(".cow.json").exists();
+        println!("Created workspace '{}' at {}", name, dest.display());
+        println!("To remove: cow remove {}", name);
+        if !has_cow_json {
+            println!(
+                "Tip: add a .cow.json to remove stale build dirs or run post-clone setup. \
+                 See the README for details."
+            );
+        }
     }
     Ok(())
 }
@@ -151,6 +158,7 @@ fn post_clone_setup(
     branch_arg: Option<&str>,
     change_arg: Option<&str>,
     from_arg: Option<&str>,
+    message: Option<&str>,
     no_clean: bool,
     name: &str,
     state: &mut State,
@@ -167,7 +175,7 @@ fn post_clone_setup(
         Vcs::Git => setup_git(dest, branch_arg)?,
         // tarpaulin-ignore-start
         Vcs::Jj => {
-            setup_jj(dest, change_arg, from_arg)?;
+            setup_jj(dest, change_arg, from_arg, message)?;
             None
         }
         // tarpaulin-ignore-end
@@ -457,7 +465,7 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
 }
 
 // tarpaulin-ignore-start
-fn setup_jj(workspace: &Path, change: Option<&str>, from: Option<&str>) -> Result<()> {
+fn setup_jj(workspace: &Path, change: Option<&str>, from: Option<&str>, message: Option<&str>) -> Result<()> {
     // The cp -Rc clone already has its own .jj/ at a different path, so it is
     // independent from the source without any extra steps.
 
@@ -487,6 +495,17 @@ fn setup_jj(workspace: &Path, change: Option<&str>, from: Option<&str>) -> Resul
                  If '{}' is immutable, use --from {} to create a new change on top.",
                 change_id, change_id, change_id
             );
+        }
+    }
+
+    if let Some(msg) = message {
+        let status = Command::new("jj")
+            .args(["describe", "-m", msg])
+            .current_dir(workspace)
+            .status()
+            .context("Failed to run jj describe")?;
+        if !status.success() {
+            bail!("Failed to set initial change description in workspace.");
         }
     }
 
@@ -672,6 +691,8 @@ mod tests {
             no_clean: true,
             change: None,
             from: None,
+            message: None,
+            print_path: false,
         };
         let err = run(args).unwrap_err();
         assert!(

@@ -69,6 +69,14 @@ pub struct CreateArgs {
     /// Skip post-clone cleanup of runtime artefacts (pid files, socket files, etc.)
     #[arg(long)]
     pub no_clean: bool,
+
+    /// Set the initial jj change description (jj repos only)
+    #[arg(long, short = 'm')]
+    pub message: Option<String>,
+
+    /// Print only the workspace path on stdout after creation (suppress other output)
+    #[arg(long)]
+    pub print_path: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -90,6 +98,10 @@ pub struct RemoveArgs {
     /// Skip dirty-state warnings and remove immediately
     #[arg(long)]
     pub force: bool,
+
+    /// Skip confirmation prompts (still shows dirty warnings)
+    #[arg(long, short = 'y')]
+    pub yes: bool,
 
     /// Remove all workspaces (can be combined with --source)
     #[arg(long)]
