@@ -85,7 +85,7 @@ pub fn run(args: ListArgs) -> Result<()> {
         // Pad status manually since ANSI codes bloat the string length
         let status_padded = format!("{}{}", status_str, " ".repeat(W_STATUS.saturating_sub(5)));
 
-        let source_str = truncate_path(&w.source.display().to_string(), W_SOURCE - 1);
+        let source_str = truncate_path(&contract_home(&w.source.display().to_string()), W_SOURCE - 1);
         let ago = time_ago(w.created_at);
 
         println!(
@@ -95,6 +95,30 @@ pub fn run(args: ListArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Replace the home directory prefix with `~` so paths stay readable.
+fn contract_home(s: &str) -> String {
+    // Prefer HOME env-var over dirs::home_dir(): on macOS dirs uses
+    // NSHomeDirectory() which ignores the HOME env, so tests that override HOME
+    // would not see their fake home reflected.
+    let home = std::env::var("HOME")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(dirs::home_dir);
+    if let Some(home_path) = home {
+        // Canonicalise to resolve /var → /private/var on macOS, matching the
+        // canonicalised paths stored in workspace state.
+        let home_str = home_path
+            .canonicalize()
+            .unwrap_or(home_path)
+            .display()
+            .to_string();
+        if let Some(rest) = s.strip_prefix(&home_str) {
+            return format!("~{}", rest);
+        }
+    }
+    s.to_string()
 }
 
 fn truncate_path(s: &str, max: usize) -> String {
@@ -129,6 +153,37 @@ fn time_ago(dt: chrono::DateTime<Utc>) -> String {
 mod tests {
     use super::*;
     use chrono::Duration;
+
+    #[test]
+    fn contract_home_replaces_home_prefix_with_tilde() {
+        // Build a path that starts with the current process's resolved home.
+        let home = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(dirs::home_dir)
+            .unwrap();
+        let home_canonical = home.canonicalize().unwrap_or(home);
+        let path = home_canonical.join("projects/foo").display().to_string();
+        assert_eq!(contract_home(&path), "~/projects/foo");
+    }
+
+    #[test]
+    fn contract_home_unchanged_when_outside_home() {
+        // /private/tmp is guaranteed not to be under HOME on macOS.
+        let result = contract_home("/private/tmp/outside/path");
+        assert_eq!(result, "/private/tmp/outside/path");
+    }
+
+    #[test]
+    fn contract_home_home_dir_itself_becomes_tilde() {
+        let home = std::env::var("HOME")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(dirs::home_dir)
+            .unwrap();
+        let home_canonical = home.canonicalize().unwrap_or(home).display().to_string();
+        assert_eq!(contract_home(&home_canonical), "~");
+    }
 
     #[test]
     fn truncate_path_short_unchanged() {

@@ -419,6 +419,18 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
 }
 
 fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
+    // Remove stale worktree refs inherited from the CoW clone. The source repo
+    // may have had linked worktrees whose absolute paths are baked into
+    // .git/worktrees/. Those entries are invalid in the clone: git worktree
+    // prune won't remove them reliably because the original directories still
+    // exist on disk (git only checks existence, not whether the back-link
+    // points to this repo). Deleting the directory is safe — a fresh workspace
+    // starts with no linked worktrees.
+    let worktrees_dir = workspace.join(".git").join("worktrees");
+    if worktrees_dir.exists() {
+        let _ = std::fs::remove_dir_all(&worktrees_dir);
+    }
+
     let Some(branch) = branch else {
         return Ok(vcs::git_current_branch(workspace));
     };

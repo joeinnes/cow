@@ -3160,6 +3160,76 @@ mod tests {
         assert!(dest.exists(), "dest dir should exist after successful create");
     }
 
+    // ─── create: stale worktree prune ────────────────────────────────────────
+
+    #[test]
+    fn create_prunes_stale_git_worktree_refs() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // Add a git worktree to the source so .git/worktrees/ has an entry with
+        // absolute paths. The clone will inherit this entry, which will be stale
+        // from the clone's perspective (its .git back-link points to the source).
+        let wt_dir = TempDir::new().unwrap();
+        git(source.path(), &[
+            "worktree", "add",
+            wt_dir.path().to_str().unwrap(),
+            "-b", "feature-stale",
+        ]);
+
+        env.cow()
+            .args(["create", "pruned-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let workspace = env.home.join(".cow/workspaces/pruned-ws");
+
+        // git worktree list should show only 1 entry (the workspace itself).
+        // Without pruning the clone inherits the stale entry, giving 2 entries.
+        let output = std::process::Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(&workspace)
+            .output()
+            .unwrap();
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let count = stdout.lines().filter(|l| l.starts_with("worktree ")).count();
+        assert_eq!(count, 1, "workspace should have no stale worktree refs, got:\n{}", stdout);
+    }
+
+    // ─── list: path display ──────────────────────────────────────────────────
+
+    #[test]
+    fn list_source_path_contracts_home_dir() {
+        let env = Env::new();
+
+        // Create the source repo inside the fake HOME so it qualifies for ~ contraction.
+        let source = env.home.join("projects/myrepo");
+        std::fs::create_dir_all(&source).unwrap();
+        git(&source, &["init", "-b", "main"]);
+        git(&source, &["config", "user.email", "test@cow.test"]);
+        git(&source, &["config", "user.name", "cow-test"]);
+        git(&source, &["config", "commit.gpgsign", "false"]);
+        git(&source, &["config", "tag.gpgsign", "false"]);
+        std::fs::write(source.join("hello.txt"), "hello").unwrap();
+        git(&source, &["add", "."]);
+        git(&source, &["commit", "-m", "initial"]);
+
+        env.cow()
+            .args(["create", "home-ws", "--source", source.to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            // contracted path visible
+            .stdout(predicate::str::contains("~/projects/myrepo"))
+            // full absolute home path must NOT appear
+            .stdout(predicate::str::contains(env.home.display().to_string()).not());
+    }
+
     // ─── create: output messages ─────────────────────────────────────────────
 
     #[test]
