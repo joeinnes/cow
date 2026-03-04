@@ -9,7 +9,7 @@ pub fn run(args: CdArgs) -> Result<()> {
     let entry = state
         .get(&args.name)
         .cloned()
-        .with_context(|| format!("Workspace '{}' not found.", args.name))?;
+        .with_context(|| format!("Pasture '{}' not found.", args.name))?;
 
     println!("{}", entry.path.display());
     Ok(())

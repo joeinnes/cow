@@ -20,9 +20,9 @@ mod tests {
         source.path().file_name().unwrap().to_str().unwrap()
     }
 
-    /// Build the expected workspace path: `~/.cow/workspaces/<src_basename>/<name>`.
+    /// Build the expected pasture path: `~/.cow/pastures/<src_basename>/<name>`.
     fn ws_path(home: &Path, source: &TempDir, name: &str) -> PathBuf {
-        home.join(format!(".cow/workspaces/{}/{}", src_name(source), name))
+        home.join(format!(".cow/pastures/{}/{}", src_name(source), name))
     }
 
     /// Return the scoped workspace name: `<src_basename>/<name>`.
@@ -504,6 +504,96 @@ mod tests {
         assert!(output.stdout.is_empty(), ".cow-context should not make workspace dirty");
     }
 
+    #[test]
+    fn create_writes_agent_context_files() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "agent-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "agent-ws");
+        // Agent files go in the scope directory (parent of the workspace),
+        // not inside the workspace itself — no risk of clobbering project files.
+        let scope_dir = ws.parent().unwrap();
+        assert!(scope_dir.join("AGENTS.md").exists(), "AGENTS.md should be in scope dir");
+        assert!(scope_dir.join("CLAUDE.md").exists(), "CLAUDE.md should be in scope dir");
+        assert!(scope_dir.join("GEMINI.md").exists(), "GEMINI.md should be in scope dir");
+
+        // AGENTS.md should mention the source path.
+        let agents = std::fs::read_to_string(scope_dir.join("AGENTS.md")).unwrap();
+        assert!(
+            agents.contains(source.path().to_str().unwrap()),
+            "AGENTS.md should contain the source path"
+        );
+
+        // CLAUDE.md and GEMINI.md should point at AGENTS.md.
+        let claude = std::fs::read_to_string(scope_dir.join("CLAUDE.md")).unwrap();
+        assert!(claude.contains("AGENTS.md"), "CLAUDE.md should reference AGENTS.md");
+        let gemini = std::fs::read_to_string(scope_dir.join("GEMINI.md")).unwrap();
+        assert!(gemini.contains("AGENTS.md"), "GEMINI.md should reference AGENTS.md");
+
+        // Agent files must NOT be inside the workspace (would risk clobbering).
+        assert!(!ws.join("AGENTS.md").exists(), "AGENTS.md must not be inside the workspace");
+        assert!(!ws.join("CLAUDE.md").exists(), "CLAUDE.md must not be inside the workspace");
+        assert!(!ws.join("GEMINI.md").exists(), "GEMINI.md must not be inside the workspace");
+    }
+
+    #[test]
+    fn create_second_workspace_does_not_overwrite_agents_md() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "ws-one", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws_one = ws_path(&env.home, &source, "ws-one");
+        let scope_dir = ws_one.parent().unwrap();
+        let original = std::fs::read_to_string(scope_dir.join("AGENTS.md")).unwrap();
+        let original_mtime = std::fs::metadata(scope_dir.join("AGENTS.md")).unwrap().modified().unwrap();
+
+        env.cow()
+            .args(["create", "ws-two", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let after_mtime = std::fs::metadata(scope_dir.join("AGENTS.md")).unwrap().modified().unwrap();
+        assert_eq!(original_mtime, after_mtime, "AGENTS.md should not be rewritten for a second workspace");
+        assert_eq!(
+            original,
+            std::fs::read_to_string(scope_dir.join("AGENTS.md")).unwrap(),
+            "AGENTS.md content should be unchanged"
+        );
+    }
+
+    #[test]
+    fn agent_context_files_not_inside_git_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "agent-clean-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "agent-clean-ws");
+        // Scope-dir files are outside the git repo — git status should be clean.
+        let output = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&ws)
+            .output()
+            .unwrap();
+        assert!(
+            output.stdout.is_empty(),
+            "workspace git status should be clean; got: {}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
     // ─── list ──────────────────────────────────────────────────────────────────
 
     #[test]
@@ -565,7 +655,7 @@ mod tests {
             .arg("list")
             .assert()
             .success()
-            .stdout(predicate::str::contains("No workspaces found."));
+            .stdout(predicate::str::contains("No pastures found."));
     }
 
     #[test]
@@ -672,7 +762,7 @@ mod tests {
             .arg("remove")
             .assert()
             .failure()
-            .stderr(predicate::str::contains("Specify one or more workspace names"));
+            .stderr(predicate::str::contains("Specify one or more pasture names"));
     }
 
     #[test]
@@ -731,7 +821,7 @@ mod tests {
             .args(["remove", "--all", "--force", "--source", "/nonexistent/path"])
             .assert()
             .success()
-            .stdout(predicate::str::contains("No workspaces to remove."));
+            .stdout(predicate::str::contains("No pastures to remove."));
     }
 
     #[test]
@@ -1379,7 +1469,7 @@ mod tests {
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
-            .stderr(predicate::str::contains("Failed to rebase workspace"));
+            .stderr(predicate::str::contains("Failed to rebase pasture"));
     }
 
     #[test]
@@ -1457,6 +1547,266 @@ mod tests {
             .stderr(predicate::str::contains("not found"));
     }
 
+    // ─── exec ──────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn exec_runs_command_in_pasture() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "exec-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "exec-ws");
+
+        // `pwd` should print the pasture path.
+        let out = env.cow()
+            .args(["run", &scoped(&source, "exec-ws"), "pwd"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let printed = String::from_utf8_lossy(&out).trim().to_string();
+        // canonicalize both sides to absorb any symlink differences
+        assert_eq!(
+            std::fs::canonicalize(&printed).unwrap(),
+            std::fs::canonicalize(&ws).unwrap(),
+        );
+    }
+
+    #[test]
+    fn exec_propagates_exit_code() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "exit-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["run", &scoped(&source, "exit-ws"), "sh", "-c", "exit 42"])
+            .assert()
+            .code(42);
+    }
+
+    #[test]
+    fn exec_unknown_pasture_fails() {
+        let env = Env::new();
+
+        env.cow()
+            .args(["run", "no-such-pasture", "echo", "hi"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not found"));
+    }
+
+    #[test]
+    fn run_sets_cow_env_vars() {
+        // COW_PASTURE, COW_SOURCE, COW_PASTURE_PATH should be set in subprocess.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "env-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let name = scoped(&source, "env-ws");
+        let pasture = ws_path(&env.home, &source, "env-ws");
+
+        // Check COW_PASTURE
+        let out = env.cow()
+            .args(["run", &name, "sh", "-c", "printf '%s' \"$COW_PASTURE\""])
+            .assert().success().get_output().stdout.clone();
+        assert_eq!(String::from_utf8_lossy(&out), name);
+
+        // Check COW_PASTURE_PATH
+        let out = env.cow()
+            .args(["run", &name, "sh", "-c", "printf '%s' \"$COW_PASTURE_PATH\""])
+            .assert().success().get_output().stdout.clone();
+        let printed = std::path::PathBuf::from(String::from_utf8_lossy(&out).to_string());
+        assert_eq!(
+            printed.canonicalize().unwrap_or(printed),
+            pasture.canonicalize().unwrap_or(pasture),
+        );
+
+        // Check COW_SOURCE
+        let out = env.cow()
+            .args(["run", &name, "sh", "-c", "printf '%s' \"$COW_SOURCE\""])
+            .assert().success().get_output().stdout.clone();
+        let printed_src = std::path::PathBuf::from(String::from_utf8_lossy(&out).to_string());
+        assert_eq!(
+            printed_src.canonicalize().unwrap_or(printed_src),
+            source.path().canonicalize().unwrap(),
+        );
+    }
+
+    #[test]
+    fn run_creates_pm_shim_for_npm() {
+        // When package-lock.json is present, a shim for npm should be written
+        // and the shims directory should be prepended to PATH.
+        let env = Env::new();
+        let source = make_git_repo();
+        std::fs::write(source.path().join("package-lock.json"), "{}").unwrap();
+
+        env.cow()
+            .args(["create", "npm-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let name = scoped(&source, "npm-ws");
+        let shim_path = env.home.join(".cow/shims/npm");
+
+        // Run any command to trigger shim creation.
+        env.cow()
+            .args(["run", &name, "true"])
+            .assert()
+            .success();
+
+        assert!(shim_path.exists(), "npm shim should be created");
+
+        // Shim should be executable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&shim_path).unwrap().permissions().mode();
+            assert!(mode & 0o100 != 0, "npm shim should be executable");
+        }
+
+        // PATH should be prepended with shims dir.
+        let out = env.cow()
+            .args(["run", &name, "sh", "-c", "printf '%s' \"$PATH\""])
+            .assert().success().get_output().stdout.clone();
+        let path_str = String::from_utf8_lossy(&out);
+        let shims_dir = env.home.join(".cow/shims").to_string_lossy().into_owned();
+        assert!(path_str.starts_with(&shims_dir), "shims dir should be first in PATH");
+    }
+
+    #[test]
+    fn run_no_pm_shim_without_lockfile() {
+        // No lockfile → shims dir should NOT be prepended and no shim written.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "no-pm-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let name = scoped(&source, "no-pm-ws");
+
+        env.cow()
+            .args(["run", &name, "true"])
+            .assert()
+            .success();
+
+        let shims_dir = env.home.join(".cow/shims");
+        // shims dir either doesn't exist or has no files for this PM.
+        assert!(!shims_dir.join("npm").exists(), "no npm shim without lockfile");
+    }
+
+    // ─── recreate ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn recreate_produces_fresh_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "fresh-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "fresh-ws");
+        // Write a file into the workspace to prove it gets wiped.
+        std::fs::write(ws.join("canary.txt"), "canary").unwrap();
+        assert!(ws.join("canary.txt").exists());
+
+        env.cow()
+            .args(["recreate", &scoped(&source, "fresh-ws")])
+            .assert()
+            .success();
+
+        assert!(ws.exists(), "workspace should exist after recreate");
+        assert!(!ws.join("canary.txt").exists(), "workspace should be fresh (canary wiped)");
+        assert!(ws.join("hello.txt").exists(), "source files should be present");
+
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("fresh-ws"));
+    }
+
+    #[test]
+    fn recreate_preserves_branch() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "branch-ws", "--branch", "my-branch", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["recreate", &scoped(&source, "branch-ws")])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "branch-ws");
+        let branch = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["symbolic-ref", "--short", "HEAD"])
+                .current_dir(&ws)
+                .output()
+                .unwrap()
+                .stdout,
+        ).unwrap().trim().to_string();
+        assert_eq!(branch, "my-branch", "branch should be preserved on recreate");
+    }
+
+    #[test]
+    fn recreate_with_branch_override() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "override-ws", "--branch", "original", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["recreate", &scoped(&source, "override-ws"), "--branch", "new-branch"])
+            .assert()
+            .success();
+
+        let ws = ws_path(&env.home, &source, "override-ws");
+        let branch = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["symbolic-ref", "--short", "HEAD"])
+                .current_dir(&ws)
+                .output()
+                .unwrap()
+                .stdout,
+        ).unwrap().trim().to_string();
+        assert_eq!(branch, "new-branch", "--branch override should take effect");
+    }
+
+    #[test]
+    fn recreate_unknown_pasture_fails() {
+        let env = Env::new();
+
+        env.cow()
+            .args(["recreate", "no-such-pasture"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not found"));
+    }
+
     // ─── mcp ───────────────────────────────────────────────────────────────────
 
     #[test]
@@ -1510,7 +1860,7 @@ mod tests {
         let text = String::from_utf8_lossy(&raw);
         let resp: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         let tools = resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 10);
 
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
         assert!(names.contains(&"cow_create"));
@@ -1519,6 +1869,10 @@ mod tests {
         assert!(names.contains(&"cow_status"));
         assert!(names.contains(&"cow_sync"));
         assert!(names.contains(&"cow_extract"));
+        assert!(names.contains(&"cow_migrate"));
+        assert!(names.contains(&"cow_materialise"));
+        assert!(names.contains(&"cow_fetch_from"));
+        assert!(names.contains(&"cow_run"));
     }
 
     #[test]
@@ -1635,7 +1989,7 @@ mod tests {
         assert!(resp["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("Created workspace"));
+            .contains("Created pasture"));
     }
 
     #[test]
@@ -2074,7 +2428,7 @@ mod tests {
         ).unwrap();
         // Both stdout (Created...) and stderr (submodule warning) should be merged
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("Created workspace"), "should have stdout");
+        assert!(text.contains("Created pasture"), "should have stdout");
         assert!(text.contains("submodule"), "should have merged stderr");
     }
 
@@ -2116,7 +2470,7 @@ mod tests {
             .assert()
             .success()
             .stderr(predicate::str::contains("unpushed"))
-            .stdout(predicate::str::contains("Removed workspace"));
+            .stdout(predicate::str::contains("Removed pasture"));
     }
 
     #[test]
@@ -2144,7 +2498,7 @@ mod tests {
             .assert()
             .success()
             .stderr(predicate::str::contains("unpushed"))
-            .stdout(predicate::str::contains("Removed workspace"));
+            .stdout(predicate::str::contains("Removed pasture"));
     }
 
     #[test]
@@ -2167,7 +2521,7 @@ mod tests {
             .args(["remove", "--force", &scoped(&source, "synced-ws")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Removed workspace"));
+            .stdout(predicate::str::contains("Removed pasture"));
         // stderr should NOT contain "unpushed"
     }
 
@@ -2302,7 +2656,7 @@ mod tests {
             .args(["status", &scoped(&source, "jj-dirty")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("Status:     dirty"));
+            .stdout(predicate::str::contains("Status:     changed (jj working copy)"));
     }
 
     #[test]
@@ -2366,7 +2720,7 @@ mod tests {
             .assert()
             .success()
             .stderr(predicate::str::contains("has modifications"))
-            .stdout(predicate::str::contains("Removed workspace"));
+            .stdout(predicate::str::contains("Removed pasture"));
     }
 
     #[test]
@@ -2517,7 +2871,7 @@ mod tests {
             .args(["remove", &scoped(&source, "jj-no-force")])
             .assert()
             .success()
-            .stdout(predicate::str::contains("No workspaces were removed"));
+            .stdout(predicate::str::contains("No pastures were removed"));
 
         assert!(ws_path(&env.home, &source, "jj-no-force").exists());
     }
@@ -3037,8 +3391,8 @@ mod tests {
             .success()
             .stdout(predicate::str::contains("Migrated 'wt-feature'"));
 
-        // A new cow workspace should exist.
-        let ws = env.home.join(".cow/workspaces/wt-feature");
+        // A new cow pasture should exist.
+        let ws = env.home.join(".cow/pastures/wt-feature");
         assert!(ws.exists(), "cow workspace directory should exist");
         assert!(ws.join(".git").is_dir(), "workspace should be a git repo");
         assert!(ws.join("hello.txt").exists(), "source files should be present");
@@ -3052,6 +3406,75 @@ mod tests {
             .assert()
             .success()
             .stdout(predicate::str::contains("wt-feature"));
+    }
+
+    #[test]
+    fn migrate_git_worktree_clears_stale_worktree_refs() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // Add a linked worktree to the source so .git/worktrees/ is populated.
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("stale-feature");
+        git(source.path(), &["worktree", "add", "-b", "stale-branch", wt_path.to_str().unwrap()]);
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated 'stale-feature'"));
+
+        // The migrated pasture must not contain stale worktree refs.
+        let ws = env.home.join(".cow/pastures/stale-feature");
+        assert!(ws.exists(), "cow workspace should exist");
+        let worktrees_dir = ws.join(".git").join("worktrees");
+        assert!(
+            !worktrees_dir.exists(),
+            ".git/worktrees/ should have been removed from the migrated pasture"
+        );
+    }
+
+    #[test]
+    fn migrate_git_worktree_checkout_failure_rolls_back() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // Create a linked worktree on a new branch.
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("missing-branch");
+        git(source.path(), &["worktree", "add", "-b", "missing-branch", wt_path.to_str().unwrap()]);
+
+        // Remove the branch ref directly so the clone won't have it,
+        // causing git checkout to fail in the migrated pasture.
+        std::fs::remove_file(source.path().join(".git/refs/heads/missing-branch")).unwrap();
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+            ])
+            .assert()
+            .success();
+
+        // The failed checkout should have triggered rollback — no directory left.
+        let ws = env.home.join(".cow/pastures/missing-branch");
+        assert!(!ws.exists(), "rolled-back pasture directory should not exist");
+
+        // The workspace should not be registered in state.
+        let out = env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let list = String::from_utf8_lossy(&out);
+        assert!(!list.contains("missing-branch"), "failed migrate should not appear in list");
     }
 
     #[test]
@@ -3075,8 +3498,8 @@ mod tests {
             .success()
             .stdout(predicate::str::contains("Migrated 'forced-feature'"));
 
-        let ws = env.home.join(".cow/workspaces/forced-feature");
-        assert!(ws.exists(), "workspace should be created even when dirty with --force");
+        let ws = env.home.join(".cow/pastures/forced-feature");
+        assert!(ws.exists(), "pasture should be created even when dirty with --force");
     }
 
     #[test]
@@ -3085,8 +3508,8 @@ mod tests {
         let source = make_git_repo();
         let source_path = source.path().canonicalize().unwrap();
 
-        // Create an orphaned workspace: in ~/.cow/workspaces but not in state.
-        let ws_dir = env.home.join(".cow/workspaces");
+        // Create an orphaned pasture: in ~/.cow/pastures but not in state.
+        let ws_dir = env.home.join(".cow/pastures");
         std::fs::create_dir_all(&ws_dir).unwrap();
         let orphan = ws_dir.join("orphaned-ws");
 
@@ -3271,6 +3694,34 @@ mod tests {
     }
 
     #[test]
+    fn create_output_shows_detected_vcs() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "vcs-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Detected VCS: git"));
+    }
+
+    #[test]
+    fn create_print_path_suppresses_vcs_line() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let out = env.cow()
+            .args(["create", "quiet-ws", "--source", source.path().to_str().unwrap(), "--print-path"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let text = String::from_utf8_lossy(&out);
+        assert!(!text.contains("Detected VCS"), "--print-path should suppress VCS line");
+    }
+
+    #[test]
     fn create_output_mentions_cow_json_when_absent() {
         let env = Env::new();
         let source = make_git_repo();
@@ -3402,8 +3853,8 @@ mod tests {
             .success();
 
         // Explicit scoped name used as-is — path is under "other/feature-x"
-        let dest = env.home.join(".cow/workspaces/other/feature-x");
-        assert!(dest.exists(), "explicitly scoped workspace path should exist");
+        let dest = env.home.join(".cow/pastures/other/feature-x");
+        assert!(dest.exists(), "explicitly scoped pasture path should exist");
 
         env.cow()
             .args(["list"])
@@ -3443,5 +3894,492 @@ mod tests {
         let list = String::from_utf8_lossy(&out);
         assert!(list.contains(&scoped(&source_a, "develop")));
         assert!(list.contains(&scoped(&source_b, "develop")));
+    }
+
+    // ─── helpers (shared by new tests) ─────────────────────────────────────────
+
+    fn read_state(home: &std::path::Path) -> serde_json::Value {
+        let path = home.join(".cow/state.json");
+        let content = std::fs::read_to_string(&path).expect("state.json should exist");
+        serde_json::from_str(&content).expect("state.json should be valid JSON")
+    }
+
+    fn is_symlink(path: &std::path::Path) -> bool {
+        path.symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+    }
+
+    // ─── cow-5xts: auto-symlink large dirs ─────────────────────────────────────
+
+    #[test]
+    fn create_auto_symlinks_large_dir() {
+        // Non-dep dir (fixtures/) should be whole-dir symlinked.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Large dir: 5 files, threshold set to 3 via .cow.json
+        let fixtures = src.join("fixtures");
+        std::fs::create_dir_all(&fixtures).unwrap();
+        for i in 0..5 { std::fs::write(fixtures.join(format!("f{}.json", i)), "{}").unwrap(); }
+
+        // Small dir: below threshold
+        let small = src.join("src");
+        std::fs::create_dir_all(&small).unwrap();
+        std::fs::write(small.join("main.rs"), "fn main(){}").unwrap();
+
+        std::fs::write(
+            src.join(".cow.json"),
+            r#"{"pre_clone":{"symlink_threshold":3}}"#,
+        ).unwrap();
+
+        let out = env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("fixtures"), "warning should name the dir");
+        assert!(stdout.contains("cow materialise"), "warning should mention materialise");
+        assert!(stdout.contains("writes affect source"), "whole-dir warning text");
+
+        let pasture = ws_path(&env.home, &source, "test");
+        assert!(is_symlink(&pasture.join("fixtures")), "fixtures should be a whole-dir symlink");
+        assert!(!is_symlink(&pasture.join("src")), "src should NOT be a symlink");
+
+        let state = read_state(&env.home);
+        let dirs = &state["pastures"][0]["symlinked_dirs"];
+        assert!(dirs.as_array().unwrap().iter().any(|v| v.as_str() == Some("fixtures")));
+    }
+
+    #[test]
+    fn create_per_package_symlinks_dep_dir() {
+        // Dep dir (node_modules/) should use per-package symlinks: real dir,
+        // each top-level entry is a symlink. New writes go local.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Simulate node_modules with packages (threshold 3, 5 packages).
+        let nm = src.join("node_modules");
+        std::fs::create_dir_all(nm.join("lodash")).unwrap();
+        std::fs::write(nm.join("lodash/index.js"), "module.exports={}").unwrap();
+        std::fs::create_dir_all(nm.join("react")).unwrap();
+        std::fs::write(nm.join("react/index.js"), "module.exports={}").unwrap();
+        std::fs::create_dir_all(nm.join("express")).unwrap();
+        std::fs::write(nm.join("express/index.js"), "module.exports={}").unwrap();
+        std::fs::create_dir_all(nm.join("axios")).unwrap();
+        std::fs::create_dir_all(nm.join("vue")).unwrap();
+
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        let out = env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(stdout.contains("node_modules"), "warning should name node_modules");
+        assert!(stdout.contains("per-package"), "should say per-package");
+        assert!(stdout.contains("cow materialise"), "warning should mention materialise");
+
+        let pasture = ws_path(&env.home, &source, "test");
+        // node_modules/ itself should be a real dir (not a symlink).
+        assert!(!is_symlink(&pasture.join("node_modules")), "node_modules should NOT be a whole-dir symlink");
+        assert!(pasture.join("node_modules").is_dir(), "node_modules should be a real dir");
+        // Each package entry should be a symlink.
+        assert!(is_symlink(&pasture.join("node_modules/lodash")), "lodash should be a symlink");
+        assert!(is_symlink(&pasture.join("node_modules/react")), "react should be a symlink");
+
+        // State records in linked_dirs, not symlinked_dirs.
+        let state = read_state(&env.home);
+        let linked = &state["pastures"][0]["linked_dirs"];
+        assert!(linked.as_array().unwrap().iter().any(|v| v.as_str() == Some("node_modules")));
+        let symlinked = &state["pastures"][0]["symlinked_dirs"];
+        assert!(symlinked.as_array().unwrap().is_empty(), "symlinked_dirs should be empty");
+    }
+
+    #[test]
+    fn create_per_package_new_install_is_local() {
+        // New packages written to the pasture's node_modules go local (do not
+        // appear in the source repo's node_modules).
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let nm = src.join("node_modules");
+        std::fs::create_dir_all(nm.join("existing-pkg")).unwrap();
+        std::fs::create_dir_all(nm.join("another-pkg")).unwrap();
+        std::fs::create_dir_all(nm.join("third-pkg")).unwrap();
+        std::fs::create_dir_all(nm.join("fourth-pkg")).unwrap();
+
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "test");
+
+        // Simulate `npm install new-package` by writing into the pasture's node_modules.
+        let new_pkg = pasture.join("node_modules/new-package");
+        std::fs::create_dir_all(&new_pkg).unwrap();
+        std::fs::write(new_pkg.join("index.js"), "module.exports={}").unwrap();
+
+        // The new package should NOT appear in the source.
+        assert!(!src.join("node_modules/new-package").exists(),
+            "new package should not appear in source node_modules");
+        // Existing packages should still resolve through symlinks.
+        assert!(pasture.join("node_modules/existing-pkg").exists(),
+            "existing package should still be accessible");
+    }
+
+    #[test]
+    fn create_no_symlink_skips_detection() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let nm = src.join("node_modules");
+        std::fs::create_dir_all(&nm).unwrap();
+        for i in 0..5 { std::fs::write(nm.join(format!("f{}.js", i)), "x").unwrap(); }
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        let out = env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch", "--no-symlink"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let stdout = String::from_utf8_lossy(&out);
+        assert!(!stdout.contains("symlinked"), "no warning should appear with --no-symlink");
+
+        let pasture = ws_path(&env.home, &source, "test");
+        assert!(!is_symlink(&pasture.join("node_modules")), "node_modules should be cloned, not symlinked");
+    }
+
+    #[test]
+    fn materialise_replaces_symlink_with_clone() {
+        // Whole-dir symlink (fixtures/) should be replaced with a real clone.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let fixtures = src.join("fixtures");
+        std::fs::create_dir_all(&fixtures).unwrap();
+        for i in 0..5 { std::fs::write(fixtures.join(format!("f{}.json", i)), "{}").unwrap(); }
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "test");
+        assert!(is_symlink(&pasture.join("fixtures")), "should start as a whole-dir symlink");
+
+        env.cow()
+            .args(["materialise", &scoped(&source, "test")])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("done"));
+
+        assert!(!is_symlink(&pasture.join("fixtures")), "should be real dir after materialise");
+        assert!(pasture.join("fixtures").is_dir(), "fixtures should still exist as a dir");
+
+        let state = read_state(&env.home);
+        let dirs = &state["pastures"][0]["symlinked_dirs"];
+        assert!(dirs.as_array().unwrap().is_empty(), "symlinked_dirs should be empty after materialise");
+    }
+
+    #[test]
+    fn materialise_per_package_replaces_entries() {
+        // Per-package symlinks (linked_dirs): materialise should clonefile each
+        // top-level entry so it becomes a real copy in the pasture.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let nm = src.join("node_modules");
+        std::fs::create_dir_all(nm.join("lodash")).unwrap();
+        std::fs::write(nm.join("lodash/index.js"), "module.exports={}").unwrap();
+        std::fs::create_dir_all(nm.join("react")).unwrap();
+        std::fs::write(nm.join("react/index.js"), "module.exports={}").unwrap();
+        std::fs::create_dir_all(nm.join("express")).unwrap();
+        std::fs::create_dir_all(nm.join("axios")).unwrap();
+
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "test");
+        assert!(is_symlink(&pasture.join("node_modules/lodash")), "lodash should start as a symlink");
+
+        env.cow()
+            .args(["materialise", &scoped(&source, "test")])
+            .assert()
+            .success();
+
+        // After materialise, entries should be real dirs, not symlinks.
+        assert!(!is_symlink(&pasture.join("node_modules/lodash")), "lodash should no longer be a symlink");
+        assert!(pasture.join("node_modules/lodash").is_dir(), "lodash should still exist");
+        assert!(pasture.join("node_modules/lodash/index.js").exists(), "lodash/index.js should exist");
+
+        let state = read_state(&env.home);
+        let linked = &state["pastures"][0]["linked_dirs"];
+        assert!(linked.as_array().unwrap().is_empty(), "linked_dirs should be empty after materialise");
+    }
+
+    #[test]
+    fn materialise_is_idempotent_when_already_cloned() {
+        // Uses a non-dep dir (fixtures/) so whole-dir symlink semantics apply.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let fixtures = src.join("fixtures");
+        std::fs::create_dir_all(&fixtures).unwrap();
+        for i in 0..5 { std::fs::write(fixtures.join(format!("f{}.json", i)), "{}").unwrap(); }
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        // materialise twice — second run should succeed gracefully
+        env.cow().args(["materialise", &scoped(&source, "test")]).assert().success();
+        env.cow().args(["materialise", &scoped(&source, "test")]).assert().success()
+            .stdout(predicate::str::contains("no symlinked"));
+    }
+
+    // ─── cow-re21: --worktree mode ──────────────────────────────────────────────
+
+    #[test]
+    fn create_worktree_creates_linked_worktree() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        env.cow()
+            .args(["create", "feat", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("worktree"));
+
+        let pasture = ws_path(&env.home, &source, "feat");
+        assert!(pasture.exists(), "pasture directory should exist");
+        // A linked worktree has .git as a FILE, not a directory
+        assert!(pasture.join(".git").is_file(), ".git should be a file in a linked worktree");
+
+        let state = read_state(&env.home);
+        assert_eq!(state["pastures"][0]["is_worktree"], serde_json::Value::Bool(true));
+    }
+
+    #[test]
+    fn create_worktree_fails_for_non_git_source() {
+        let env = Env::new();
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Fake a jj primary workspace: .jj/repo/ present
+        std::fs::create_dir_all(tmp.path().join(".jj/repo")).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", tmp.path().to_str().unwrap(), "--worktree", "--no-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("only supported for git"));
+    }
+
+    #[test]
+    fn create_worktree_duplicate_branch_fails() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // First worktree creates branch "feat"
+        env.cow()
+            .args(["create", "feat", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        // Second worktree trying the same branch should fail
+        env.cow()
+            .args(["create", "feat2", "--source", src.to_str().unwrap(),
+                   "--worktree", "--branch", "feat"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("already checked out"));
+    }
+
+    #[test]
+    fn remove_worktree_pasture_cleans_up_link() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        env.cow()
+            .args(["create", "feat", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "feat");
+        assert!(pasture.exists());
+
+        env.cow()
+            .args(["remove", &scoped(&source, "feat"), "--yes"])
+            .assert()
+            .success();
+
+        assert!(!pasture.exists(), "pasture directory should be gone after remove");
+
+        // git worktree list should no longer show the removed worktree
+        let out = std::process::Command::new("git")
+            .args(["worktree", "list"])
+            .current_dir(src)
+            .output()
+            .unwrap();
+        let list = String::from_utf8_lossy(&out.stdout);
+        assert!(!list.contains(pasture.to_str().unwrap()), "worktree should be removed from source");
+    }
+
+    #[test]
+    fn create_worktree_commits_visible_across_pastures() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Create two worktrees
+        env.cow()
+            .args(["create", "wt-a", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "wt-b", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        let wt_a = ws_path(&env.home, &source, "wt-a");
+        let wt_b = ws_path(&env.home, &source, "wt-b");
+
+        // Make a commit in wt-a
+        std::fs::write(wt_a.join("new.txt"), "new content").unwrap();
+        git(&wt_a, &["config", "user.email", "test@cow.test"]);
+        git(&wt_a, &["config", "user.name", "cow-test"]);
+        git(&wt_a, &["config", "commit.gpgsign", "false"]);
+        git(&wt_a, &["add", "new.txt"]);
+        git(&wt_a, &["commit", "-m", "commit-in-wt-a"]);
+
+        // The commit should be visible from wt-b without any fetch
+        // (worktrees share .git/objects/)
+        let log = std::process::Command::new("git")
+            .args(["log", "--oneline", "--all"])
+            .current_dir(&wt_b)
+            .output()
+            .unwrap();
+        let log_str = String::from_utf8_lossy(&log.stdout);
+        assert!(log_str.contains("commit-in-wt-a"), "commit from wt-a should be visible in wt-b");
+    }
+
+    // ─── cow-pfq7: cow fetch-from ───────────────────────────────────────────────
+
+    #[test]
+    fn fetch_from_fetches_refs_from_named_pasture() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Create two pastures (regular clones)
+        env.cow()
+            .args(["create", "pa", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "pb", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pa = ws_path(&env.home, &source, "pa");
+        let pb = ws_path(&env.home, &source, "pb");
+
+        // Make a commit in pa that pb doesn't know about
+        std::fs::write(pa.join("new.txt"), "from pa").unwrap();
+        git(&pa, &["config", "user.email", "test@cow.test"]);
+        git(&pa, &["config", "user.name", "cow-test"]);
+        git(&pa, &["config", "commit.gpgsign", "false"]);
+        git(&pa, &["add", "new.txt"]);
+        git(&pa, &["commit", "-m", "commit-in-pa"]);
+
+        let pa_name = scoped(&source, "pa");
+        let pb_name = scoped(&source, "pb");
+
+        // fetch-from pa into pb
+        env.cow()
+            .args(["fetch-from", &pa_name, "--name", &pb_name])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("refs/cow/"));
+
+        // Verify the ref exists in pb
+        let refs_out = std::process::Command::new("git")
+            .args(["show-ref"])
+            .current_dir(&pb)
+            .output()
+            .unwrap();
+        let refs_str = String::from_utf8_lossy(&refs_out.stdout);
+        assert!(refs_str.contains("refs/cow/"), "fetched refs should appear in pb");
+    }
+
+    #[test]
+    fn fetch_from_unknown_pasture_fails() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        env.cow()
+            .args(["create", "pa", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["fetch-from", "does-not-exist", "--name", &scoped(&source, "pa")])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not found"));
+    }
+
+    #[test]
+    fn fetch_from_cross_source_requires_force() {
+        let env = Env::new();
+        let source_a = make_git_repo();
+        let source_b = make_git_repo();
+
+        env.cow()
+            .args(["create", "pa", "--source", source_a.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "pb", "--source", source_b.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pa_name = scoped(&source_a, "pa");
+        let pb_name = scoped(&source_b, "pb");
+
+        // Without --force: should fail
+        env.cow()
+            .args(["fetch-from", &pa_name, "--name", &pb_name])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("different sources"));
     }
 }

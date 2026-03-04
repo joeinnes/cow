@@ -9,7 +9,7 @@ pub fn run(args: ListArgs) -> Result<()> {
     state.prune_deleted();
     state.save()?;
 
-    let mut workspaces = state.workspaces.clone();
+    let mut workspaces = state.pastures.clone();
 
     if let Some(source) = args.source {
         let source = source
@@ -43,7 +43,7 @@ pub fn run(args: ListArgs) -> Result<()> {
     }
 
     if workspaces.is_empty() {
-        println!("No workspaces found.");
+        println!("No pastures found.");
         return Ok(());
     }
 
@@ -100,7 +100,13 @@ pub fn run(args: ListArgs) -> Result<()> {
                 Vcs::Jj => vcs::jj_diff_summary(&w.path).lines().filter(|l| !l.is_empty()).count(),
                 // tarpaulin-ignore-end
             };
-            let raw = format!("dirty ({})", count);
+            // jj's working copy is always a commit — use "changed" not "dirty"
+            let raw = match w.vcs {
+                Vcs::Git => format!("dirty ({})", count),
+                // tarpaulin-ignore-start
+                Vcs::Jj => format!("changed ({})", count),
+                // tarpaulin-ignore-end
+            };
             let len = raw.len();
             (len, raw.yellow().to_string())
         } else {

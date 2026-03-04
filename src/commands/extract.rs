@@ -11,7 +11,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
     let entry = state
         .get(&args.name)
         .cloned()
-        .with_context(|| format!("Workspace '{}' not found.", args.name))?;
+        .with_context(|| format!("Pasture '{}' not found.", args.name))?;
 
     if args.patch.is_none() && args.branch.is_none() {
         bail!("Specify --patch <FILE> and/or --branch <NAME>.");
@@ -69,7 +69,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                     .status()
                     .context("Failed to add temporary remote")?;
                 if !add_status.success() {
-                    bail!("Failed to register workspace as a temporary remote in source repo.");
+                    bail!("Failed to register pasture as a temporary remote in source repo.");
                 }
 
                 // Fetch workspace HEAD into source as the named branch.
@@ -104,7 +104,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                     .status()
                     .context("Failed to run jj git export")?;
                 if !export_status.success() {
-                    bail!("Failed to export jj workspace state to git backend.");
+                    bail!("Failed to export jj pasture state to git backend.");
                 }
 
                 // The source is a colocated jj+git repo — plain git remote
@@ -118,7 +118,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                     .status()
                     .context("Failed to add temporary remote")?;
                 if !add_status.success() {
-                    bail!("Failed to register workspace as a temporary remote in source repo.");
+                    bail!("Failed to register pasture as a temporary remote in source repo.");
                 }
 
                 let fetch_status = Command::new("git")

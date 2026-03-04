@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::{
     cli::MigrateArgs,
-    state::{self, State, WorkspaceEntry},
+    state::{self, State, PastureEntry},
     vcs::{self, Vcs},
 };
 
@@ -72,7 +72,7 @@ pub fn run(args: MigrateArgs) -> Result<()> {
         return Ok(());
     }
 
-    let workspace_dir = state::default_workspace_dir()?;
+    let pasture_dir = state::default_pasture_dir()?;
     let mut any_migrated = false;
 
     for candidate in &candidates {
@@ -92,7 +92,7 @@ pub fn run(args: MigrateArgs) -> Result<()> {
             continue;
         }
 
-        match migrate_candidate(&source, &detected_vcs, candidate, &workspace_dir, &mut state) {
+        match migrate_candidate(&source, &detected_vcs, candidate, &pasture_dir, &mut state) {
             Ok(()) => {
                 println!("Migrated '{}'", candidate.name);
                 any_migrated = true;
@@ -138,7 +138,7 @@ fn discover_git_worktrees(source: &Path, state: &State) -> Result<Vec<MigrateCan
 
     let mut candidates = Vec::new();
     for (path, branch) in worktrees {
-        if state.workspaces.iter().any(|w| w.path == path) {
+        if state.pastures.iter().any(|w| w.path == path) {
             continue;
         }
         let name = path
@@ -184,7 +184,7 @@ fn discover_jj_workspaces(source: &Path, state: &State) -> Result<Vec<MigrateCan
             continue;
         }
         let path = PathBuf::from(String::from_utf8_lossy(&root_out.stdout).trim());
-        if state.workspaces.iter().any(|w| w.path == path) {
+        if state.pastures.iter().any(|w| w.path == path) {
             continue;
         }
         let is_dirty = vcs::jj_is_dirty(&path);
@@ -202,16 +202,16 @@ fn discover_jj_workspaces(source: &Path, state: &State) -> Result<Vec<MigrateCan
 // tarpaulin-ignore-end
 
 fn discover_orphaned(source: &Path, state: &State) -> Result<Vec<MigrateCandidate>> {
-    let workspace_dir = state::default_workspace_dir()?;
-    if !workspace_dir.exists() {
+    let pasture_dir = state::default_pasture_dir()?;
+    if !pasture_dir.exists() {
         return Ok(vec![]);
     }
 
     let registered_paths: std::collections::HashSet<PathBuf> =
-        state.workspaces.iter().map(|w| w.path.clone()).collect();
+        state.pastures.iter().map(|w| w.path.clone()).collect();
 
     let mut candidates = Vec::new();
-    for entry in std::fs::read_dir(&workspace_dir)? {
+    for entry in std::fs::read_dir(&pasture_dir)? {
         let entry = entry?;
         let path = entry.path();
         if !path.is_dir() || registered_paths.contains(&path) {
@@ -261,7 +261,7 @@ fn migrate_candidate(
     source: &Path,
     vcs: &Vcs,
     candidate: &MigrateCandidate,
-    workspace_dir: &Path,
+    pasture_dir: &Path,
     state: &mut State,
 ) -> Result<()> {
     match &candidate.kind {
@@ -272,7 +272,7 @@ fn migrate_candidate(
             } else {
                 None
             };
-            state.add(WorkspaceEntry {
+            state.add(PastureEntry {
                 name: candidate.name.clone(),
                 path: candidate.path.clone(),
                 source: source.to_path_buf(),
@@ -280,23 +280,32 @@ fn migrate_candidate(
                 branch: candidate.branch.clone(),
                 initial_commit,
                 created_at: chrono::Utc::now(),
+                symlinked_dirs: Vec::new(),
+                linked_dirs: Vec::new(),
+                is_worktree: false,
             });
             Ok(())
         }
 
         CandidateKind::GitWorktree => {
-            let dest = workspace_dir.join(&candidate.name);
+            let dest = pasture_dir.join(&candidate.name);
             if dest.exists() {
                 bail!("Destination '{}' already exists.", dest.display());
             }
             if state.get(&candidate.name).is_some() {
-                bail!("A workspace named '{}' already exists in state.", candidate.name);
+                bail!("A pasture named '{}' already exists in state.", candidate.name);
             }
 
-            std::fs::create_dir_all(workspace_dir)
-                .context("Failed to create workspace directory")?;
+            std::fs::create_dir_all(pasture_dir)
+                .context("Failed to create pasture directory")?;
 
             cow_clone_git(source, &dest)?;
+
+            // Remove stale worktree refs copied from the source.
+            let worktrees_dir = dest.join(".git").join("worktrees");
+            if worktrees_dir.exists() {
+                let _ = std::fs::remove_dir_all(&worktrees_dir);
+            }
 
             if let Some(ref branch) = candidate.branch {
                 let status = Command::new("git")
@@ -305,15 +314,16 @@ fn migrate_candidate(
                     .status()
                     .context("Failed to run git checkout")?;
                 if !status.success() {
-                    eprintln!(
-                        "Warning: could not check out branch '{}' in migrated workspace.",
+                    let _ = std::fs::remove_dir_all(&dest);
+                    bail!(
+                        "Could not check out branch '{}' in migrated pasture — rolled back.",
                         branch
                     );
                 }
             }
 
             let initial_commit = vcs::git_head_sha(&dest);
-            write_context_file_git(&WorkspaceEntry {
+            write_context_file_git(&PastureEntry {
                 name: candidate.name.clone(),
                 path: dest.clone(),
                 source: source.to_path_buf(),
@@ -321,9 +331,12 @@ fn migrate_candidate(
                 branch: candidate.branch.clone(),
                 initial_commit: initial_commit.clone(),
                 created_at: chrono::Utc::now(),
+                symlinked_dirs: Vec::new(),
+                linked_dirs: Vec::new(),
+                is_worktree: false,
             })?;
 
-            state.add(WorkspaceEntry {
+            state.add(PastureEntry {
                 name: candidate.name.clone(),
                 path: dest,
                 source: source.to_path_buf(),
@@ -331,6 +344,9 @@ fn migrate_candidate(
                 branch: candidate.branch.clone(),
                 initial_commit,
                 created_at: chrono::Utc::now(),
+                symlinked_dirs: Vec::new(),
+                linked_dirs: Vec::new(),
+                is_worktree: false,
             });
 
             // Remove the old git worktree.
@@ -352,16 +368,16 @@ fn migrate_candidate(
 
         // tarpaulin-ignore-start
         CandidateKind::JjWorkspace { workspace_name } => {
-            let dest = workspace_dir.join(&candidate.name);
+            let dest = pasture_dir.join(&candidate.name);
             if dest.exists() {
                 bail!("Destination '{}' already exists.", dest.display());
             }
             if state.get(&candidate.name).is_some() {
-                bail!("A workspace named '{}' already exists in state.", candidate.name);
+                bail!("A pasture named '{}' already exists in state.", candidate.name);
             }
 
-            std::fs::create_dir_all(workspace_dir)
-                .context("Failed to create workspace directory")?;
+            std::fs::create_dir_all(pasture_dir)
+                .context("Failed to create pasture directory")?;
 
             let add_status = Command::new("jj")
                 .args([
@@ -380,7 +396,7 @@ fn migrate_candidate(
                 bail!("jj workspace add failed for '{}'.", dest.display());
             }
 
-            state.add(WorkspaceEntry {
+            state.add(PastureEntry {
                 name: candidate.name.clone(),
                 path: dest,
                 source: source.to_path_buf(),
@@ -388,6 +404,9 @@ fn migrate_candidate(
                 branch: None,
                 initial_commit: None,
                 created_at: chrono::Utc::now(),
+                symlinked_dirs: Vec::new(),
+                linked_dirs: Vec::new(),
+                is_worktree: false,
             });
 
             let forget_status = Command::new("jj")
@@ -440,7 +459,7 @@ fn cow_clone_git(source: &Path, dest: &Path) -> Result<()> {
 
 /// Write a `.cow-context` file and add it to `.git/info/exclude` so it is
 /// not tracked by git.
-fn write_context_file_git(entry: &WorkspaceEntry) -> Result<()> {
+fn write_context_file_git(entry: &PastureEntry) -> Result<()> {
     let ctx = serde_json::json!({
         "name": entry.name,
         "source": entry.source.to_string_lossy(),

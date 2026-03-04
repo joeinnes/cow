@@ -77,13 +77,13 @@ fn tools_list() -> Value {
     json!([
         {
             "name": "cow_create",
-            "description": "Create a new copy-on-write workspace from a git or jj repository using APFS clonefile(2). Near-instant and near-zero disk overhead.",
+            "description": "Create a new cow pasture (copy-on-write workspace) from a git or jj repository using APFS clonefile(2). Near-instant and near-zero disk overhead. 'create a cow pasture' → use this tool.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Name for the workspace (auto-generates agent-1, agent-2, … if omitted)"
+                        "description": "Name for the pasture (auto-generates agent-1, agent-2, … if omitted)"
                     },
                     "source": {
                         "type": "string",
@@ -91,11 +91,11 @@ fn tools_list() -> Value {
                     },
                     "branch": {
                         "type": "string",
-                        "description": "Git branch to check out or create in the workspace"
+                        "description": "Git branch to check out or create in the pasture"
                     },
                     "dir": {
                         "type": "string",
-                        "description": "Parent directory for workspaces (defaults to ~/.cow/workspaces/)"
+                        "description": "Parent directory for pastures (defaults to ~/.cow/pastures/)"
                     }
                 },
                 "required": ["source"]
@@ -103,48 +103,48 @@ fn tools_list() -> Value {
         },
         {
             "name": "cow_list",
-            "description": "List all active cow workspaces, returning JSON with name, path, source, branch, vcs, and created_at.",
+            "description": "List all active cow pastures, returning JSON with name, path, source, branch, vcs, and created_at.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "source": {
                         "type": "string",
-                        "description": "Filter to only workspaces created from this source repository path"
+                        "description": "Filter to only pastures created from this source repository path"
                     }
                 }
             }
         },
         {
             "name": "cow_remove",
-            "description": "Remove one or more workspaces, deleting their directories. Always runs non-interactively.",
+            "description": "Remove one or more pastures, deleting their directories. Always runs non-interactively.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "names": {
                         "type": "array",
                         "items": { "type": "string" },
-                        "description": "Workspace names to remove"
+                        "description": "Pasture names to remove"
                     },
                     "all": {
                         "type": "boolean",
-                        "description": "Remove all workspaces (can be combined with source)"
+                        "description": "Remove all pastures (can be combined with source)"
                     },
                     "source": {
                         "type": "string",
-                        "description": "Only remove workspaces from this source repository path"
+                        "description": "Only remove pastures from this source repository path"
                     }
                 }
             }
         },
         {
             "name": "cow_status",
-            "description": "Show detailed status of a workspace as JSON: path, branch, VCS dirty/clean state, modified files, initial_commit, and created_at.",
+            "description": "Show detailed status of a pasture as JSON: path, branch, VCS dirty/clean state, modified files, initial_commit, and created_at.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Workspace name"
+                        "description": "Pasture name"
                     }
                 },
                 "required": ["name"]
@@ -152,17 +152,17 @@ fn tools_list() -> Value {
         },
         {
             "name": "cow_sync",
-            "description": "Fetch the latest commits from the source repository and rebase (or merge) the workspace onto them. No network access required.",
+            "description": "Fetch the latest commits from the source repository and rebase (or merge) the pasture onto them. No network access required.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Workspace name"
+                        "description": "Pasture name"
                     },
                     "source_branch": {
                         "type": "string",
-                        "description": "Branch in the source repo to sync from (defaults to workspace's current branch)"
+                        "description": "Branch in the source repo to sync from (defaults to pasture's current branch)"
                     },
                     "merge": {
                         "type": "boolean",
@@ -174,17 +174,17 @@ fn tools_list() -> Value {
         },
         {
             "name": "cow_extract",
-            "description": "Extract changes from a workspace. Use --branch to create a local branch in the source repo, or --patch to write a patch file.",
+            "description": "Extract changes from a pasture. Use --branch to create a local branch in the source repo, or --patch to write a patch file.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Workspace name"
+                        "description": "Pasture name"
                     },
                     "branch": {
                         "type": "string",
-                        "description": "Create this branch in the source repo at workspace HEAD"
+                        "description": "Create this branch in the source repo at pasture HEAD"
                     },
                     "patch": {
                         "type": "string",
@@ -192,6 +192,86 @@ fn tools_list() -> Value {
                     }
                 },
                 "required": ["name"]
+            }
+        },
+        {
+            "name": "cow_migrate",
+            "description": "Discover existing git worktrees or jj workspaces in a source repository and register them as cow pastures, moving their directories under ~/.cow/pastures/.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Absolute path to the source repository to scan for worktrees/workspaces"
+                    },
+                    "all": {
+                        "type": "boolean",
+                        "description": "Migrate all discovered candidates without prompting"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Skip dirty-state checks and migrate anyway"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Show what would be done without making any changes"
+                    }
+                },
+                "required": ["source"]
+            }
+        },
+        {
+            "name": "cow_materialise",
+            "description": "Replace symlinked dependency directories in a pasture with real APFS clonefiles, making the pasture fully independent of the source. Use when you need to install packages locally without affecting the source.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Pasture name"
+                    }
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "cow_fetch_from",
+            "description": "Fetch refs from another pasture into this one, enabling cross-pasture rebase without touching any remote. Useful for rebasing one agent's work on top of another's.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": {
+                        "type": "string",
+                        "description": "Name of the pasture to fetch refs from"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Name of the pasture to fetch into (defaults to current directory)"
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Allow fetching from a pasture with a different source repo"
+                    }
+                },
+                "required": ["from"]
+            }
+        },
+        {
+            "name": "cow_run",
+            "description": "Run a command inside a pasture's working directory. Automatically detects the package manager (npm/pnpm/yarn/bun) from lockfiles and injects shims so install subcommands write to the pasture-local node_modules. Sets COW_PASTURE, COW_SOURCE, and COW_PASTURE_PATH env vars.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Pasture name"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Command and arguments to run (e.g. 'npm install', 'pnpm test', 'cargo build')"
+                    }
+                },
+                "required": ["name", "command"]
             }
         }
     ])
@@ -278,6 +358,59 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
             }
             if let Some(p) = args["patch"].as_str() {
                 cmd.args(["--patch", p]);
+            }
+            cmd.output()?
+        }
+        "cow_migrate" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("migrate");
+            if let Some(s) = args["source"].as_str() {
+                cmd.args(["--source", s]);
+            }
+            if args["all"].as_bool().unwrap_or(false) {
+                cmd.arg("--all");
+            }
+            if args["force"].as_bool().unwrap_or(false) {
+                cmd.arg("--force");
+            }
+            if args["dry_run"].as_bool().unwrap_or(false) {
+                cmd.arg("--dry-run");
+            }
+            cmd.output()?
+        }
+        "cow_materialise" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("materialise");
+            if let Some(n) = args["name"].as_str() {
+                cmd.arg(n);
+            }
+            cmd.output()?
+        }
+        "cow_fetch_from" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("fetch-from");
+            if let Some(f) = args["from"].as_str() {
+                cmd.arg(f);
+            }
+            if let Some(n) = args["name"].as_str() {
+                cmd.args(["--name", n]);
+            }
+            if args["force"].as_bool().unwrap_or(false) {
+                cmd.arg("--force");
+            }
+            cmd.output()?
+        }
+        "cow_run" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("run");
+            if let Some(n) = args["name"].as_str() {
+                cmd.arg(n);
+            }
+            if let Some(command) = args["command"].as_str() {
+                // Split the command string into tokens for the trailing var-arg.
+                for token in command.split_whitespace() {
+                    cmd.arg(token);
+                }
             }
             cmd.output()?
         }

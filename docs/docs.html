@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>cow — Command Reference</title>
-  <meta name="description" content="Complete command reference for cow, the APFS copy-on-write workspace manager.">
+  <meta name="description" content="Complete command reference for cow, the APFS copy-on-write pasture manager.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐄</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -380,7 +380,13 @@
         <li><a href="#cmd-extract">extract</a></li>
         <li><a href="#cmd-remove">remove</a></li>
         <li><a href="#cmd-sync">sync</a></li>
+        <li><a href="#cmd-migrate">migrate</a></li>
+        <li><a href="#cmd-run">run</a></li>
+        <li><a href="#cmd-materialise">materialise</a></li>
+        <li><a href="#cmd-fetch-from">fetch-from</a></li>
+        <li><a href="#cmd-recreate">recreate</a></li>
         <li><a href="#cmd-cd">cd</a></li>
+        <li><a href="#cmd-install">install</a></li>
         <li><a href="#cmd-mcp">mcp</a></li>
       </ul>
       <hr class="sidebar-divider">
@@ -394,26 +400,28 @@
 
       <header class="page-header">
         <span class="section-label">command reference</span>
-        <h1>All nine commands.</h1>
+        <h1>All fifteen commands.</h1>
         <p class="header-desc">Complete reference for every <code>cow</code> command and option.</p>
       </header>
 
       <!-- create -->
       <div class="cmd-block" id="cmd-create">
         <h3 class="cmd-sig"><code>cow create [OPTIONS] [NAME]</code></h3>
-        <p class="cmd-desc">Create a new workspace from a repository using APFS copy-on-write. Names are automatically scoped by source repository: <code>feature-x</code> becomes <code>brightblur/feature-x</code>. Omit the name and cow auto-generates <code>brightblur/agent-1</code>, <code>brightblur/agent-2</code>, and so on. Supply an explicit <code>scope/name</code> to override the default scope.</p>
+        <p class="cmd-desc">Create a new cow pasture (copy-on-write workspace) from a repository using APFS. Names are automatically scoped by source repository: <code>feature-x</code> becomes <code>brightblur/feature-x</code>. Omit the name and cow auto-generates <code>brightblur/agent-1</code>, <code>brightblur/agent-2</code>, and so on. Supply an explicit <code>scope/name</code> to override the default scope.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>--source &lt;PATH&gt;</code></td><td>Source repository to clone (default: current directory)</td></tr>
-            <tr><td><code>--branch &lt;BRANCH&gt;</code></td><td>Override the branch name (default: same as workspace name)</td></tr>
+            <tr><td><code>--branch &lt;BRANCH&gt;</code></td><td>Override the branch name (default: same as pasture name)</td></tr>
             <tr><td><code>--no-branch</code></td><td>Do not switch or create a branch after cloning</td></tr>
-            <tr><td><code>--change &lt;CHANGE&gt;</code></td><td>jj change ID to edit in the new workspace (jj repos only)</td></tr>
+            <tr><td><code>--change &lt;CHANGE&gt;</code></td><td>jj change ID to edit in the new pasture (jj repos only)</td></tr>
             <tr><td><code>--from &lt;REV&gt;</code></td><td>jj revision to branch from — creates a new change on top rather than editing directly (jj repos only)</td></tr>
             <tr><td><code>-m, --message &lt;MSG&gt;</code></td><td>Set the initial jj change description immediately after creation (jj repos only)</td></tr>
-            <tr><td><code>--dir &lt;PATH&gt;</code></td><td>Parent directory for workspaces (default: <code>~/.cow/workspaces/</code>)</td></tr>
+            <tr><td><code>--dir &lt;PATH&gt;</code></td><td>Parent directory for pastures (default: <code>~/.cow/pastures/</code>)</td></tr>
+            <tr><td><code>--worktree</code></td><td>Create a git linked worktree instead of an APFS clone. All worktree pastures share the same <code>.git/objects/</code> pack store — cross-pasture rebase works without any remote (git only)</td></tr>
+            <tr><td><code>--no-symlink</code></td><td>Skip large-directory detection and always perform a full clone</td></tr>
             <tr><td><code>--no-clean</code></td><td>Skip post-clone cleanup of runtime artefacts (<code>.pid</code>, <code>.sock</code>, etc.)</td></tr>
-            <tr><td><code>--print-path</code></td><td>Print only the workspace path on stdout after creation, suppressing all other output — useful for scripting and automation</td></tr>
+            <tr><td><code>--print-path</code></td><td>Print only the pasture path on stdout after creation, suppressing all other output — useful for scripting and automation</td></tr>
           </tbody>
         </table>
         <div class="cmd-note">
@@ -424,11 +432,11 @@
       <!-- list -->
       <div class="cmd-block" id="cmd-list">
         <h3 class="cmd-sig"><code>cow list [OPTIONS]</code></h3>
-        <p class="cmd-desc">List all active workspaces managed by cow. Names are shown in <code>source/workspace</code> form. The branch column is omitted when the branch matches the workspace name. Status shows <code>dirty (N)</code> with a file count.</p>
+        <p class="cmd-desc">List all active pastures managed by cow. Names are shown in <code>source/pasture</code> form. The branch column is omitted when the branch matches the pasture name. Status shows <code>dirty (N)</code> with a file count.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
-            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Filter to workspaces created from this source repository</td></tr>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Filter to pastures created from this source repository</td></tr>
             <tr><td><code>--json</code></td><td>Machine-readable JSON output for scripting and MCP tools</td></tr>
           </tbody>
         </table>
@@ -437,42 +445,42 @@
       <!-- status -->
       <div class="cmd-block" id="cmd-status">
         <h3 class="cmd-sig"><code>cow status [NAME]</code></h3>
-        <p class="cmd-desc">Show detailed status of a workspace, including its path, source repository, branch, dirty/clean state, and a short diff summary. Defaults to the current directory if it is a cow workspace.</p>
+        <p class="cmd-desc">Show detailed status of a pasture, including its path, source repository, branch, dirty/clean state, and a short diff summary. Defaults to the current directory if it is a cow pasture.</p>
       </div>
 
       <!-- diff -->
       <div class="cmd-block" id="cmd-diff">
         <h3 class="cmd-sig"><code>cow diff [NAME]</code></h3>
-        <p class="cmd-desc">Show uncommitted changes in a workspace relative to its last commit. Passes through to <code>git diff</code> or <code>jj diff</code> as appropriate. Defaults to the current directory if inside a workspace.</p>
+        <p class="cmd-desc">Show uncommitted changes in a pasture relative to its last commit. Passes through to <code>git diff</code> or <code>jj diff</code> as appropriate. Defaults to the current directory if inside a pasture.</p>
       </div>
 
       <!-- extract -->
       <div class="cmd-block" id="cmd-extract">
         <h3 class="cmd-sig"><code>cow extract [OPTIONS] &lt;NAME&gt;</code></h3>
-        <p class="cmd-desc">Extract committed changes from a workspace back into the source repository. Use <code>--patch</code> to produce a patch file for review, or <code>--branch</code> to land the branch directly in the source repo so you can push a PR normally.</p>
+        <p class="cmd-desc">Extract committed changes from a pasture back into the source repository. Use <code>--patch</code> to produce a patch file for review, or <code>--branch</code> to land the branch directly in the source repo so you can push a PR normally.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>--patch &lt;FILE&gt;</code></td><td>Write a unified diff patch to this file</td></tr>
-            <tr><td><code>--branch &lt;NAME&gt;</code></td><td>Create (or update) this branch in the source repo at workspace HEAD</td></tr>
+            <tr><td><code>--branch &lt;NAME&gt;</code></td><td>Create (or update) this branch in the source repo at pasture HEAD</td></tr>
           </tbody>
         </table>
         <div class="cmd-note">
-          Direction: <code>cow extract</code> goes <em>from workspace to source</em>. <code>cow sync</code> goes the other way.
+          Direction: <code>cow extract</code> goes <em>from pasture to source</em>. <code>cow sync</code> goes the other way.
         </div>
       </div>
 
       <!-- remove -->
       <div class="cmd-block" id="cmd-remove">
         <h3 class="cmd-sig"><code>cow remove [OPTIONS] &lt;NAME...&gt;</code></h3>
-        <p class="cmd-desc">Remove one or more workspaces. Warns before removing workspaces with uncommitted changes, and offers to push unpushed commits first. Pass multiple names to remove several workspaces at once.</p>
+        <p class="cmd-desc">Remove one or more pastures. Warns before removing pastures with uncommitted changes, and offers to push unpushed commits first. Pass multiple names to remove several pastures at once.</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>--force</code></td><td>Skip dirty-state warnings and remove without prompting</td></tr>
             <tr><td><code>-y, --yes</code></td><td>Skip confirmation prompts without implying a safety override — dirty warnings are still shown</td></tr>
-            <tr><td><code>--all</code></td><td>Remove all workspaces (can be scoped with <code>--source</code>)</td></tr>
-            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Scope <code>--all</code> to workspaces from this source repository</td></tr>
+            <tr><td><code>--all</code></td><td>Remove all pastures (can be scoped with <code>--source</code>)</td></tr>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Scope <code>--all</code> to pastures from this source repository</td></tr>
           </tbody>
         </table>
       </div>
@@ -480,31 +488,99 @@
       <!-- sync -->
       <div class="cmd-block" id="cmd-sync">
         <h3 class="cmd-sig"><code>cow sync [SOURCE_BRANCH]</code></h3>
-        <p class="cmd-desc">Fetch the latest commits from the source repository and rebase (or merge) the workspace onto them. Defaults to syncing with the workspace's own branch; pass a branch name to sync against a different one (e.g. <code>cow sync main</code>).</p>
+        <p class="cmd-desc">Fetch the latest commits from the source repository and rebase (or merge) the pasture onto them. Defaults to syncing with the pasture's own branch; pass a branch name to sync against a different one (e.g. <code>cow sync main</code>).</p>
         <table class="opts-table">
           <thead><tr><th>Option</th><th>Description</th></tr></thead>
           <tbody>
             <tr><td><code>--merge</code></td><td>Merge instead of rebase</td></tr>
-            <tr><td><code>--name &lt;NAME&gt;</code></td><td>Target a named workspace instead of auto-detecting from the current directory</td></tr>
+            <tr><td><code>--name &lt;NAME&gt;</code></td><td>Target a named pasture instead of auto-detecting from the current directory</td></tr>
           </tbody>
         </table>
-        <div class="cmd-note">Not yet supported for jj workspaces.</div>
+        <div class="cmd-note">Not yet supported for jj pastures.</div>
+      </div>
+
+      <!-- migrate -->
+      <div class="cmd-block" id="cmd-migrate">
+        <h3 class="cmd-sig"><code>cow migrate [OPTIONS]</code></h3>
+        <p class="cmd-desc">Discover existing git linked worktrees, jj secondary workspaces, and orphaned cow directories for a source repository and migrate each one into a proper cow-managed APFS clone pasture. Without <code>--all</code>, lists candidates and exits — nothing is modified.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--source &lt;PATH&gt;</code></td><td>Source repository to scan (default: current directory)</td></tr>
+            <tr><td><code>--all</code></td><td>Migrate all discovered candidates without prompting</td></tr>
+            <tr><td><code>--force</code></td><td>Migrate dirty candidates (those with uncommitted changes)</td></tr>
+            <tr><td><code>--dry-run</code></td><td>Print what would happen without making any changes</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- run -->
+      <div class="cmd-block" id="cmd-run">
+        <h3 class="cmd-sig"><code>cow run &lt;NAME&gt; &lt;CMD&gt; [ARGS...]</code></h3>
+        <p class="cmd-desc">Run a command inside a pasture's working directory. Automatically detects the package manager from lockfiles (<code>pnpm-lock.yaml</code>, <code>yarn.lock</code>, <code>bun.lockb</code>/<code>bun.lock</code>, <code>package-lock.json</code>) and injects shims so install subcommands write to the pasture-local <code>node_modules</code> rather than the shared source. All other subcommands pass through unchanged.</p>
+        <div class="cmd-note">
+          Three environment variables are always set for the subprocess:<br>
+          <code>COW_PASTURE</code> — pasture name<br>
+          <code>COW_SOURCE</code> — absolute path to the source repository<br>
+          <code>COW_PASTURE_PATH</code> — absolute path to the pasture directory
+        </div>
+      </div>
+
+      <!-- materialise -->
+      <div class="cmd-block" id="cmd-materialise">
+        <h3 class="cmd-sig"><code>cow materialise &lt;NAME&gt;</code></h3>
+        <p class="cmd-desc">Replace symlinked dependency directories in a pasture with real APFS clonefiles. After materialisation the pasture is fully independent — packages can be added, removed, or upgraded without affecting the source or any other pasture.</p>
+        <div class="cmd-note">
+          Large dep dirs (<code>node_modules</code>, <code>vendor</code>, <code>.venv</code>, <code>Pods</code>, etc.) are symlinked per-package at create time to keep clone overhead near zero. Run <code>cow materialise</code> when you need full isolation for package management.
+        </div>
+      </div>
+
+      <!-- fetch-from -->
+      <div class="cmd-block" id="cmd-fetch-from">
+        <h3 class="cmd-sig"><code>cow fetch-from &lt;FROM&gt; [OPTIONS]</code></h3>
+        <p class="cmd-desc">Fetch all refs from another pasture into this one, enabling cross-pasture rebase without touching any remote. Useful for rebasing one agent's work on top of another's.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--name &lt;NAME&gt;</code></td><td>Pasture to fetch into (default: current directory)</td></tr>
+            <tr><td><code>--force</code></td><td>Allow fetching from a pasture with a different source repository</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- recreate -->
+      <div class="cmd-block" id="cmd-recreate">
+        <h3 class="cmd-sig"><code>cow recreate &lt;NAME&gt; [OPTIONS]</code></h3>
+        <p class="cmd-desc">Remove a pasture and immediately re-create it from the same source. Useful for getting a clean slate without having to remember the original source path.</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--branch &lt;BRANCH&gt;</code></td><td>Override the branch checked out in the fresh clone</td></tr>
+            <tr><td><code>--no-branch</code></td><td>Do not switch or create a branch (stay on source's current branch)</td></tr>
+          </tbody>
+        </table>
       </div>
 
       <!-- cd -->
       <div class="cmd-block" id="cmd-cd">
         <h3 class="cmd-sig"><code>cow cd &lt;NAME&gt;</code></h3>
-        <p class="cmd-desc">Print the absolute path of a named workspace. Designed for shell integration rather than direct use.</p>
-        <div class="cmd-note">Add to <code>~/.zshrc</code> or <code>~/.bashrc</code>:<br><br>
-          <code>function cowcd() { cd "$(cow cd "$1")"; }</code><br><br>
-          Then use <code>cowcd feature-x</code> to jump straight into a workspace.
+        <p class="cmd-desc">Print the absolute path of a named pasture. Designed for shell integration rather than direct use.</p>
+        <div class="cmd-note">Run <code>cow install</code> to set up shell integration automatically (zsh and bash supported). This adds <code>cowcd</code> and tab completion to your shell config.<br><br>
+          Then use <code>cowcd brightblur/feature-x</code> to jump straight into a pasture. Tab completion requires <code>jq</code>.<br><br>
+          A shell function is required because a subprocess cannot change the working directory of its parent shell — this is a fundamental Unix constraint, and the same reason tools like <code>z</code> and <code>fzf</code> also require shell functions for directory jumping.
         </div>
+      </div>
+
+      <!-- install -->
+      <div class="cmd-block" id="cmd-install">
+        <h3 class="cmd-sig"><code>cow install</code></h3>
+        <p class="cmd-desc">Install the <code>cowcd</code> shell function and tab completion into your shell config (<code>~/.zshrc</code> for zsh, <code>~/.bashrc</code> for bash). Idempotent — safe to run multiple times. Detects your shell from <code>$SHELL</code>.</p>
       </div>
 
       <!-- mcp -->
       <div class="cmd-block" id="cmd-mcp">
         <h3 class="cmd-sig"><code>cow mcp</code></h3>
-        <p class="cmd-desc">Run cow as a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> stdio server, exposing <code>cow_create</code>, <code>cow_list</code>, <code>cow_remove</code>, <code>cow_status</code>, and <code>cow_diff</code> as MCP tools so agents can manage workspaces without any human intervention.</p>
+        <p class="cmd-desc">Run cow as a <a href="https://modelcontextprotocol.io">Model Context Protocol</a> stdio server, exposing all cow commands as MCP tools so agents can manage pastures without any human intervention: <code>cow_create</code>, <code>cow_list</code>, <code>cow_remove</code>, <code>cow_status</code>, <code>cow_sync</code>, <code>cow_extract</code>, <code>cow_migrate</code>, <code>cow_materialise</code>, <code>cow_fetch_from</code>, and <code>cow_run</code>.</p>
         <div class="cmd-note">
           Configure in <code>~/.claude.json</code> (global) or a project-local <code>.mcp.json</code>. See the <a href="index.html#mcp">MCP section</a> on the homepage for the config snippet.
         </div>
@@ -518,7 +594,7 @@
   <span class="s">"post_clone"</span>: <span class="k">{</span>
     <span class="c">// Paths to remove (glob patterns ok)</span>
     <span class="s">"remove"</span>: [<span class="s">".next/server"</span>, <span class="s">"*.pid"</span>, <span class="s">"*.sock"</span>],
-    <span class="c">// Commands to run inside the new workspace</span>
+    <span class="c">// Commands to run inside the new pasture</span>
     <span class="s">"run"</span>: [<span class="s">"npm run codegen"</span>]
   <span class="k">}</span>
 <span class="k">}</span></div>
