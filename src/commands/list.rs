@@ -18,6 +18,8 @@ pub fn run(args: ListArgs) -> Result<()> {
         workspaces.retain(|w| w.source == source);
     }
 
+    workspaces.sort_by(|a, b| a.name.cmp(&b.name));
+
     if args.json {
         let out: Vec<serde_json::Value> = workspaces.iter().map(|w| {
             let current_branch = match w.vcs {
