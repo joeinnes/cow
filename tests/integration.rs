@@ -1202,7 +1202,7 @@ mod tests {
         git(source.path(), &["commit", "-m", "source update"]);
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "sync-ws")])
+            .args(["sync", &scoped(&source, "sync-ws"), "--source-branch", "main"])
             .assert()
             .success()
             .stdout(predicate::str::contains("sync-ws"));
@@ -1228,7 +1228,7 @@ mod tests {
         git(source.path(), &["commit", "-m", "source merge update"]);
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "merge-ws"), "--merge"])
+            .args(["sync", &scoped(&source, "merge-ws"), "--source-branch", "main", "--merge"])
             .assert()
             .success()
             .stdout(predicate::str::contains("merge-ws"));
@@ -1252,7 +1252,7 @@ mod tests {
         std::fs::write(workspace.join("uncommitted.txt"), "wip").unwrap();
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "dirty-sync-ws")])
+            .args(["sync", &scoped(&source, "dirty-sync-ws"), "--source-branch", "main"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("uncommitted changes"));
@@ -1263,7 +1263,7 @@ mod tests {
         let env = Env::new();
 
         env.cow()
-            .args(["sync", "main", "--name", "no-such-ws"])
+            .args(["sync", "no-such-ws", "--source-branch", "main"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("not found"));
@@ -1288,7 +1288,7 @@ mod tests {
         jj_run(&env.home, source.path(), &["new"]);
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "jj-sync-rebase")])
+            .args(["sync", &scoped(&source, "jj-sync-rebase"), "--source-branch", "main"])
             .assert()
             .success()
             .stdout(predicate::str::contains("Synced"));
@@ -1316,7 +1316,7 @@ mod tests {
         .unwrap();
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "jj-sync-dirty")])
+            .args(["sync", &scoped(&source, "jj-sync-dirty"), "--source-branch", "main"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("uncommitted changes"));
@@ -1334,7 +1334,7 @@ mod tests {
 
         // No source_branch arg — should bail with a helpful message.
         env.cow()
-            .args(["sync", "--name", &scoped(&source, "jj-sync-nobranch")])
+            .args(["sync", &scoped(&source, "jj-sync-nobranch")])
             .assert()
             .failure()
             .stderr(predicate::str::contains("source branch explicitly"));
@@ -1361,7 +1361,7 @@ mod tests {
 
         // Sync without specifying a branch — should default to workspace's current branch (main).
         env.cow()
-            .args(["sync", "--name", &scoped(&source, "nobranch-ws")])
+            .args(["sync", &scoped(&source, "nobranch-ws")])
             .assert()
             .success()
             .stdout(predicate::str::contains("nobranch-ws"));
@@ -1388,7 +1388,7 @@ mod tests {
 
         // Run sync from inside the workspace with no --name.
         env.cow()
-            .args(["sync", "main"])
+            .args(["sync", "--source-branch", "main"])
             .current_dir(&workspace)
             .assert()
             .success()
@@ -1425,7 +1425,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "fetch-err-ws")])
+            .args(["sync", &scoped(&source, "fetch-err-ws"), "--source-branch", "main"])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -1465,7 +1465,7 @@ mod tests {
         }
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "rebase-err-ws")])
+            .args(["sync", &scoped(&source, "rebase-err-ws"), "--source-branch", "main"])
             .env("PATH", prepend_path(stub_dir.path()))
             .assert()
             .failure()
@@ -1497,7 +1497,7 @@ mod tests {
         git(source.path(), &["commit", "-m", "source change"]);
 
         env.cow()
-            .args(["sync", "main", "--name", &scoped(&source, "conflict-ws")])
+            .args(["sync", &scoped(&source, "conflict-ws"), "--source-branch", "main"])
             .assert()
             .failure()
             .stderr(predicate::str::contains("conflict"));
@@ -4040,6 +4040,53 @@ mod tests {
             "existing package should still be accessible");
     }
 
+    // ─── cow-jk9a: pnpm virtual store — relative symlinks stay within pasture ──
+    #[test]
+    fn create_pnpm_virtual_store_symlinks_stay_local() {
+        // pnpm's node_modules uses a virtual store: top-level entries are relative
+        // symlinks into .pnpm/. After cow create, those symlinks should resolve
+        // within the pasture (not back to the source), so tools like Turbopack
+        // don't see cross-boundary symlinks.
+        //
+        // To trigger the dep-dir per-package symlink path, node_modules must be
+        // the detected candidate (not .pnpm itself). We keep .pnpm shallow (2
+        // empty dirs → total=2 ≤ threshold=3, not added) while node_modules
+        // total (1 + 2 + 2 symlinks = 5 > 3) crosses the threshold.
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        let nm = src.join("node_modules");
+        // .pnpm has only empty package dirs — shallow enough to stay below threshold.
+        std::fs::create_dir_all(nm.join(".pnpm/next@15.0.0")).unwrap();
+        std::fs::create_dir_all(nm.join(".pnpm/react@18.0.0")).unwrap();
+        // Top-level entries are relative symlinks (as pnpm creates them).
+        std::os::unix::fs::symlink(".pnpm/next@15.0.0", nm.join("next")).unwrap();
+        std::os::unix::fs::symlink(".pnpm/react@18.0.0", nm.join("react")).unwrap();
+
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "test");
+        let p_nm = pasture.join("node_modules");
+
+        // .pnpm itself is a whole-dir symlink to the source store.
+        assert!(is_symlink(&p_nm.join(".pnpm")), ".pnpm should be a whole-dir symlink");
+
+        // Top-level package entries should be relative symlinks that resolve
+        // within the pasture — NOT absolute paths back to the source.
+        let next_link = std::fs::read_link(p_nm.join("next")).expect("next should be a symlink");
+        assert!(next_link.is_relative(), "next symlink target should be relative, got: {:?}", next_link);
+        assert!(!next_link.to_string_lossy().contains(src.to_str().unwrap()),
+            "next symlink should not reference source path, got: {:?}", next_link);
+        // The relative target must resolve via the local .pnpm symlink.
+        assert!(p_nm.join("next").exists(), "next should resolve to a real path via .pnpm");
+    }
+
     #[test]
     fn create_no_symlink_skips_detection() {
         let env = Env::new();
@@ -4382,4 +4429,769 @@ mod tests {
             .failure()
             .stderr(predicate::str::contains("different sources"));
     }
+    // ─── helpers ───────────────────────────────────────────────────────────────
+
+    /// Create a git repo with a bare "origin" remote and push main to it.
+    fn make_git_repo_with_remote() -> (TempDir, TempDir) {
+        let source = make_git_repo();
+        let bare = TempDir::new().expect("bare repo");
+        git(bare.path(), &["init", "--bare", "-b", "main"]);
+        git(source.path(), &["remote", "add", "origin", bare.path().to_str().unwrap()]);
+        git(source.path(), &["push", "origin", "main"]);
+        (source, bare)
+    }
+
+    // ─── gc ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn gc_no_candidates_without_remote() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "gc-noop", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        env.cow()
+            .args(["gc", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No pastures with branches pushed to origin."));
+    }
+
+    #[test]
+    fn gc_removes_pasture_with_pushed_branch() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        env.cow()
+            .args(["create", "gc-pushed", "--source", source.path().to_str().unwrap(), "--branch", "main"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-pushed");
+        env.cow()
+            .args(["gc", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed pasture"));
+        assert!(!path.exists(), "pasture should be removed after gc");
+    }
+
+    #[test]
+    fn gc_dry_run_does_not_remove() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        env.cow()
+            .args(["create", "gc-dry", "--source", source.path().to_str().unwrap(), "--branch", "main"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-dry");
+        env.cow()
+            .args(["gc", "--dry-run"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("dry-run"));
+        assert!(path.exists(), "dry-run must not remove the pasture");
+    }
+
+    #[test]
+    fn gc_merged_skips_unmerged_branch() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        // Create a feature branch, push it, but do NOT merge it.
+        git(source.path(), &["checkout", "-b", "feature-unmerged"]);
+        std::fs::write(source.path().join("feat.txt"), "feat").unwrap();
+        git(source.path(), &["add", "feat.txt"]);
+        git(source.path(), &["commit", "-m", "feat"]);
+        git(source.path(), &["push", "origin", "feature-unmerged"]);
+        env.cow()
+            .args(["create", "gc-unmerged", "--source", source.path().to_str().unwrap(), "--branch", "feature-unmerged"])
+            .assert()
+            .success();
+        env.cow()
+            .args(["gc", "--merged", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No pastures with branches merged to origin."));
+    }
+
+    #[test]
+    fn gc_merged_removes_merged_branch() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        // Create feature branch, push it.
+        git(source.path(), &["checkout", "-b", "feature-merged"]);
+        std::fs::write(source.path().join("feat2.txt"), "feat2").unwrap();
+        git(source.path(), &["add", "feat2.txt"]);
+        git(source.path(), &["commit", "-m", "feat2"]);
+        git(source.path(), &["push", "origin", "feature-merged"]);
+        // Create pasture on the feature branch.
+        env.cow()
+            .args(["create", "gc-merged-ws", "--source", source.path().to_str().unwrap(), "--branch", "feature-merged"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-merged-ws");
+        // Merge feature into main and push.
+        git(source.path(), &["checkout", "main"]);
+        git(source.path(), &["merge", "--no-ff", "feature-merged", "-m", "merge feat2"]);
+        git(source.path(), &["push", "origin", "main"]);
+        env.cow()
+            .args(["gc", "--merged", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed pasture"));
+        assert!(!path.exists(), "merged pasture should be removed");
+    }
+
+    #[test]
+    fn gc_shows_dirty_warning() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        env.cow()
+            .args(["create", "gc-dirty-warn", "--source", source.path().to_str().unwrap(), "--branch", "main"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-dirty-warn");
+        std::fs::write(path.join("dirty.txt"), "wip").unwrap();
+        // --yes without --force: warns about dirty state, then removes.
+        env.cow()
+            .args(["gc", "--yes"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("uncommitted changes"));
+    }
+
+    #[test]
+    fn gc_force_removes_dirty_pasture() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        env.cow()
+            .args(["create", "gc-dirty-force", "--source", source.path().to_str().unwrap(), "--branch", "main"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-dirty-force");
+        std::fs::write(path.join("dirty.txt"), "wip").unwrap();
+        env.cow()
+            .args(["gc", "--force"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed pasture"));
+        assert!(!path.exists(), "--force should remove dirty pasture without prompt");
+    }
+
+    // ─── stats ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn stats_no_pastures() {
+        let env = Env::new();
+        env.cow()
+            .arg("stats")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No pastures found."));
+    }
+
+    #[test]
+    fn stats_with_pastures() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "stats-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        env.cow()
+            .arg("stats")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Source"))
+            .stdout(predicate::str::contains("Pastures"))
+            .stdout(predicate::str::contains("On disk"));
+    }
+
+    // ─── fetch-from cwd detection ──────────────────────────────────────────────
+
+    #[test]
+    fn fetch_from_cwd_detection() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "ff-dest", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "ff-src", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        let dest_path = ws_path(&env.home, &source, "ff-dest");
+        let ff_src = scoped(&source, "ff-src");
+        // Run without --name — should detect destination from CWD.
+        env.cow()
+            .args(["fetch-from", &ff_src])
+            .current_dir(&dest_path)
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn fetch_from_cwd_not_in_pasture_fails() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "ff-src2", "--source", source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        let ff_src2 = scoped(&source, "ff-src2");
+        // Run from outside any pasture with no --name — should fail helpfully.
+        env.cow()
+            .args(["fetch-from", &ff_src2])
+            .current_dir(source.path())
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Not inside a cow pasture"));
+    }
+
+    #[test]
+    fn gc_fetch_flag_runs_without_error() {
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        env.cow()
+            .args(["create", "gc-fetch-ws", "--source", source.path().to_str().unwrap(), "--branch", "main"])
+            .assert()
+            .success();
+        // --fetch runs git fetch origin on each source repo before checking candidates.
+        env.cow()
+            .args(["gc", "--fetch", "--yes"])
+            .assert()
+            .success();
+    }
+
+    #[test]
+    fn gc_merged_with_remote_head_set() {
+        // Exercises default_branch() taking the non-fallback path (refs/remotes/origin/HEAD set).
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+        // Explicitly set origin/HEAD so git symbolic-ref returns a result.
+        git(source.path(), &["remote", "set-head", "origin", "main"]);
+        // Create feature branch, push, merge, push main.
+        git(source.path(), &["checkout", "-b", "feature-head-test"]);
+        std::fs::write(source.path().join("fht.txt"), "fht").unwrap();
+        git(source.path(), &["add", "fht.txt"]);
+        git(source.path(), &["commit", "-m", "fht"]);
+        git(source.path(), &["push", "origin", "feature-head-test"]);
+        env.cow()
+            .args(["create", "gc-head-ws", "--source", source.path().to_str().unwrap(), "--branch", "feature-head-test"])
+            .assert()
+            .success();
+        let path = ws_path(&env.home, &source, "gc-head-ws");
+        git(source.path(), &["checkout", "main"]);
+        git(source.path(), &["merge", "--no-ff", "feature-head-test", "-m", "merge fht"]);
+        git(source.path(), &["push", "origin", "main"]);
+        env.cow()
+            .args(["gc", "--merged", "--yes"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed pasture"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn fetch_from_jj_destination_fails() {
+        // Exercises fetch_from.rs line 36: bail when destination pasture is not git.
+        let env = Env::new();
+        let jj_source = make_jj_repo(&env.home);
+        let git_source = make_git_repo();
+        env.cow()
+            .args(["create", "ff-jj-dest", "--source", jj_source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "ff-git-src", "--source", git_source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        let jj_name = format!("{}/ff-jj-dest", jj_source.path().file_name().unwrap().to_str().unwrap());
+        let git_name = scoped(&git_source, "ff-git-src");
+        env.cow()
+            .args(["fetch-from", &git_name, "--name", &jj_name])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("only supports git pastures"));
+    }
+
+    #[test]
+    fn fetch_from_jj_source_fails() {
+        // Exercises fetch_from.rs line 46: bail when source (from) pasture is not git.
+        let env = Env::new();
+        let jj_source = make_jj_repo(&env.home);
+        let git_source = make_git_repo();
+        env.cow()
+            .args(["create", "ff-jj-src", "--source", jj_source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        env.cow()
+            .args(["create", "ff-git-dest2", "--source", git_source.path().to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success();
+        let jj_name = format!("{}/ff-jj-src", jj_source.path().file_name().unwrap().to_str().unwrap());
+        let git_name = scoped(&git_source, "ff-git-dest2");
+        env.cow()
+            .args(["fetch-from", &jj_name, "--name", &git_name])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not a git pasture"));
+    }
+
+    // ─── test helpers for materialise and migrate ──────────────────────────────
+
+    /// Edit a specific pasture entry in state.json.
+    fn patch_pasture_state(home: &std::path::Path, name: &str, f: impl Fn(&mut serde_json::Value)) {
+        let state_path = home.join(".cow/state.json");
+        let raw = std::fs::read_to_string(&state_path).unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        for p in state["pastures"].as_array_mut().unwrap().iter_mut() {
+            if p["name"].as_str() == Some(name) {
+                f(p);
+                break;
+            }
+        }
+        std::fs::write(&state_path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+
+    /// Remove a pasture entry from state.json by name.
+    fn remove_pasture_from_state(home: &std::path::Path, name: &str) {
+        let state_path = home.join(".cow/state.json");
+        let raw = std::fs::read_to_string(&state_path).unwrap();
+        let mut state: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let pastures = state["pastures"].as_array_mut().unwrap();
+        pastures.retain(|p| p["name"].as_str() != Some(name));
+        std::fs::write(&state_path, serde_json::to_string_pretty(&state).unwrap()).unwrap();
+    }
+
+    // ─── materialise ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn materialise_no_symlinked_dirs() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "mat-empty", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let name = scoped(&source, "mat-empty");
+        env.cow()
+            .args(["materialise", &name])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("no symlinked directories"));
+    }
+
+    #[test]
+    fn materialise_whole_dir_symlink() {
+        let env = Env::new();
+        let source = make_git_repo();
+        // Add a vendor dir to source.
+        let vendor_src = source.path().join("vendor");
+        std::fs::create_dir(&vendor_src).unwrap();
+        std::fs::write(vendor_src.join("lib.txt"), "lib").unwrap();
+        git(source.path(), &["add", "."]);
+        git(source.path(), &["commit", "-m", "add vendor"]);
+
+        env.cow()
+            .args(["create", "mat-whole", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let pasture = ws_path(&env.home, &source, "mat-whole");
+        let name = scoped(&source, "mat-whole");
+
+        // Replace the cloned vendor dir with a symlink to source's vendor.
+        std::fs::remove_dir_all(pasture.join("vendor")).unwrap();
+        std::os::unix::fs::symlink(&vendor_src, pasture.join("vendor")).unwrap();
+        assert!(is_symlink(&pasture.join("vendor")));
+
+        // Patch state to record the symlink.
+        patch_pasture_state(&env.home, &name, |p| {
+            p["symlinked_dirs"] = serde_json::json!(["vendor"]);
+        });
+
+        env.cow().args(["materialise", &name]).assert().success();
+
+        assert!(!is_symlink(&pasture.join("vendor")), "symlink should be replaced with real dir");
+        assert!(pasture.join("vendor").is_dir());
+        assert!(pasture.join("vendor/lib.txt").exists());
+
+        // State should clear symlinked_dirs.
+        let state = read_state(&env.home);
+        let entry = state["pastures"].as_array().unwrap()
+            .iter().find(|p| p["name"].as_str() == Some(&name)).unwrap();
+        assert_eq!(entry["symlinked_dirs"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn materialise_whole_dir_already_real() {
+        let env = Env::new();
+        let source = make_git_repo();
+        std::fs::create_dir(source.path().join("vendor")).unwrap();
+        std::fs::write(source.path().join("vendor/lib.txt"), "lib").unwrap();
+        git(source.path(), &["add", "."]);
+        git(source.path(), &["commit", "-m", "add vendor"]);
+
+        env.cow()
+            .args(["create", "mat-real", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let name = scoped(&source, "mat-real");
+
+        // Pasture already has a real vendor dir from the clone.
+        // Patch state to say it's symlinked.
+        patch_pasture_state(&env.home, &name, |p| {
+            p["symlinked_dirs"] = serde_json::json!(["vendor"]);
+        });
+
+        env.cow()
+            .args(["materialise", &name])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("already a real directory"));
+    }
+
+    #[test]
+    fn materialise_whole_dir_dst_gone() {
+        // dst doesn't exist at all — should silently remove from list.
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["create", "mat-gone", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let name = scoped(&source, "mat-gone");
+
+        patch_pasture_state(&env.home, &name, |p| {
+            p["symlinked_dirs"] = serde_json::json!(["vendor"]);
+        });
+
+        env.cow().args(["materialise", &name]).assert().success();
+
+        let state = read_state(&env.home);
+        let entry = state["pastures"].as_array().unwrap()
+            .iter().find(|p| p["name"].as_str() == Some(&name)).unwrap();
+        assert_eq!(entry["symlinked_dirs"].as_array().unwrap().len(), 0,
+            "ghost entry should be cleared from symlinked_dirs");
+    }
+
+    #[test]
+    fn materialise_whole_dir_src_missing() {
+        // Symlink exists in pasture but source dir was deleted.
+        let env = Env::new();
+        let source = make_git_repo();
+        let vendor_src = source.path().join("vendor");
+        std::fs::create_dir(&vendor_src).unwrap();
+        std::fs::write(vendor_src.join("lib.txt"), "lib").unwrap();
+        git(source.path(), &["add", "."]);
+        git(source.path(), &["commit", "-m", "add vendor"]);
+
+        env.cow()
+            .args(["create", "mat-srcgone", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let pasture = ws_path(&env.home, &source, "mat-srcgone");
+        let name = scoped(&source, "mat-srcgone");
+
+        std::fs::remove_dir_all(pasture.join("vendor")).unwrap();
+        std::os::unix::fs::symlink(&vendor_src, pasture.join("vendor")).unwrap();
+        std::fs::remove_dir_all(&vendor_src).unwrap();
+
+        patch_pasture_state(&env.home, &name, |p| {
+            p["symlinked_dirs"] = serde_json::json!(["vendor"]);
+        });
+
+        env.cow()
+            .args(["materialise", &name])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("no longer exists"));
+    }
+
+    #[test]
+    fn materialise_per_package_symlinks() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let nm_src = source.path().join("node_modules");
+        std::fs::create_dir(&nm_src).unwrap();
+        std::fs::create_dir(nm_src.join("pkg-a")).unwrap();
+        std::fs::write(nm_src.join("pkg-a/index.js"), "a").unwrap();
+        std::fs::create_dir(nm_src.join("pkg-b")).unwrap();
+        std::fs::write(nm_src.join("pkg-b/index.js"), "b").unwrap();
+
+        env.cow()
+            .args(["create", "mat-pkg", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let pasture = ws_path(&env.home, &source, "mat-pkg");
+        let name = scoped(&source, "mat-pkg");
+
+        // Replace cloned node_modules with per-package symlinks.
+        std::fs::remove_dir_all(pasture.join("node_modules")).unwrap();
+        std::fs::create_dir(pasture.join("node_modules")).unwrap();
+        std::os::unix::fs::symlink(nm_src.join("pkg-a"), pasture.join("node_modules/pkg-a")).unwrap();
+        std::os::unix::fs::symlink(nm_src.join("pkg-b"), pasture.join("node_modules/pkg-b")).unwrap();
+
+        patch_pasture_state(&env.home, &name, |p| {
+            p["linked_dirs"] = serde_json::json!(["node_modules"]);
+        });
+
+        env.cow().args(["materialise", &name]).assert().success();
+
+        assert!(!is_symlink(&pasture.join("node_modules/pkg-a")));
+        assert!(pasture.join("node_modules/pkg-a").is_dir());
+        assert!(pasture.join("node_modules/pkg-a/index.js").exists());
+        assert!(!is_symlink(&pasture.join("node_modules/pkg-b")));
+        assert!(pasture.join("node_modules/pkg-b").is_dir());
+    }
+
+    #[test]
+    fn materialise_per_package_new_package_in_source() {
+        // A package exists in source but not in the pasture — should be cloned in.
+        let env = Env::new();
+        let source = make_git_repo();
+        let nm_src = source.path().join("node_modules");
+        std::fs::create_dir(&nm_src).unwrap();
+        std::fs::create_dir(nm_src.join("pkg-a")).unwrap();
+        std::fs::write(nm_src.join("pkg-a/index.js"), "a").unwrap();
+
+        env.cow()
+            .args(["create", "mat-newpkg", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+        let pasture = ws_path(&env.home, &source, "mat-newpkg");
+        let name = scoped(&source, "mat-newpkg");
+
+        // Create pasture node_modules with only pkg-a (as a real dir).
+        // Then add pkg-b to source after the pasture was created.
+        std::fs::create_dir(nm_src.join("pkg-b")).unwrap();
+        std::fs::write(nm_src.join("pkg-b/index.js"), "b").unwrap();
+
+        // Pasture has an empty node_modules (no pkg-b yet).
+        std::fs::remove_dir_all(pasture.join("node_modules")).unwrap();
+        std::fs::create_dir(pasture.join("node_modules")).unwrap();
+        // pkg-a as a symlink so the per-package loop runs.
+        std::os::unix::fs::symlink(nm_src.join("pkg-a"), pasture.join("node_modules/pkg-a")).unwrap();
+
+        patch_pasture_state(&env.home, &name, |p| {
+            p["linked_dirs"] = serde_json::json!(["node_modules"]);
+        });
+
+        env.cow().args(["materialise", &name]).assert().success()
+            .stdout(predicate::str::contains("new"));
+
+        // pkg-b should have been cloned into pasture.
+        assert!(pasture.join("node_modules/pkg-b").exists());
+        assert!(pasture.join("node_modules/pkg-b/index.js").exists());
+    }
+
+    // ─── migrate ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn migrate_no_candidates() {
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No candidates found"));
+    }
+
+    #[test]
+    fn migrate_shows_candidates_without_all() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("feature-wt");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "feature-wt"]);
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Found"))
+            .stdout(predicate::str::contains("--all"));
+    }
+
+    #[test]
+    fn migrate_git_worktree_all() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("migrate-branch");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "migrate-branch"]);
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated"));
+
+        // The old worktree directory should have been removed.
+        assert!(!wt_path.exists(), "old worktree should be removed after migrate");
+
+        // A new pasture should exist in the cow pasture dir.
+        let state = read_state(&env.home);
+        let pastures = state["pastures"].as_array().unwrap();
+        assert!(pastures.iter().any(|p| p["name"].as_str() == Some("migrate-branch")),
+            "migrated pasture should appear in state");
+    }
+
+    #[test]
+    fn migrate_dry_run() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("dry-branch");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "dry-branch"]);
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all", "--dry-run"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("[dry-run]"));
+
+        // Worktree should still exist after dry-run — nothing was migrated.
+        assert!(wt_path.exists());
+    }
+
+    #[test]
+    fn migrate_skips_dirty_without_force() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("dirty-wt");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "dirty-wt"]);
+        std::fs::write(wt_path.join("untracked.txt"), "wip").unwrap();
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Skipping"));
+
+        // Nothing migrated — worktree still at its original location.
+        assert!(wt_path.exists());
+    }
+
+    #[test]
+    fn migrate_force_migrates_dirty() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("force-wt");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "force-wt"]);
+        std::fs::write(wt_path.join("untracked.txt"), "wip").unwrap();
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all", "--force"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated"));
+
+        let state = read_state(&env.home);
+        assert!(state["pastures"].as_array().unwrap().iter().any(|p| p["name"].as_str() == Some("force-wt")));
+    }
+
+    #[test]
+    fn migrate_orphaned_directory() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let pasture_dir = env.home.join(".cow/pastures");
+
+        // Create a pasture directly in the flat pastures dir (not scoped).
+        env.cow()
+            .args([
+                "create", "orphan-test",
+                "--source", source.path().to_str().unwrap(),
+                "--dir", pasture_dir.to_str().unwrap(),
+            ])
+            .assert()
+            .success();
+
+        let scoped_name = scoped(&source, "orphan-test");
+        remove_pasture_from_state(&env.home, &scoped_name);
+
+        // Pasture dir still exists on disk — now it's orphaned.
+        assert!(pasture_dir.join("orphan-test").exists());
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated"));
+
+        let state = read_state(&env.home);
+        assert!(
+            state["pastures"].as_array().unwrap().iter().any(|p| p["name"].as_str() == Some("orphan-test")),
+            "orphaned pasture should be re-registered in state"
+        );
+    }
+
+    #[test]
+    fn migrate_source_is_worktree_fails() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("src-wt");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "src-wt"]);
+
+        // Using the linked worktree as the source should be rejected.
+        env.cow()
+            .args(["migrate", "--source", wt_path.to_str().unwrap()])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("git worktree"));
+    }
+
+    #[test]
+    fn migrate_cwd_detection() {
+        // Run cow migrate from inside the source repo with no --source flag.
+        let env = Env::new();
+        let source = make_git_repo();
+        env.cow()
+            .args(["migrate"])
+            .current_dir(source.path())
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No candidates found"));
+    }
+
+    #[test]
+    fn migrate_already_registered_worktree_skipped() {
+        // A worktree that is already registered in state should not appear as a candidate.
+        let env = Env::new();
+        let source = make_git_repo();
+        let wt_base = tempfile::TempDir::new().unwrap();
+        let wt_path = wt_base.path().join("existing-wt");
+        git(source.path(), &["worktree", "add", wt_path.to_str().unwrap(), "-b", "existing-wt"]);
+
+        // Register the worktree path directly in state so discover_git_worktrees skips it.
+        // Canonicalise so the path matches what git worktree list outputs (macOS symlink resolution).
+        let canonical_wt = wt_path.canonicalize().unwrap_or_else(|_| wt_path.clone());
+        let state_path = env.home.join(".cow/state.json");
+        let initial_state = serde_json::json!({
+            "pastures": [{
+                "name": "existing-wt",
+                "path": canonical_wt.to_str().unwrap(),
+                "source": source.path().to_str().unwrap(),
+                "vcs": "git",
+                "branch": "existing-wt",
+                "initial_commit": null,
+                "created_at": "2026-01-01T00:00:00Z",
+                "symlinked_dirs": [],
+                "linked_dirs": [],
+                "is_worktree": false
+            }]
+        });
+        std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+        std::fs::write(&state_path, serde_json::to_string_pretty(&initial_state).unwrap()).unwrap();
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No candidates found"));
+    }
+
 }

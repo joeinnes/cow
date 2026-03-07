@@ -342,6 +342,59 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.7 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.7</span>
+          <span class="release-date">2026-03-07</span>
+          <span class="release-tag fix">bug fix</span>
+        </div>
+        <div class="release-body">
+          <h2>Fix cow sync name parsing, Linux materialise reflink, and test coverage improvements.</h2>
+          <p class="lead">
+            Patch release fixing two bugs — a silent mismatch in <code>cow sync</code> argument
+            parsing and missing Linux support in <code>cow materialise</code> — plus a major
+            expansion of the integration test suite.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Bug fixes</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag fix">fix</span>
+                <code>cow sync &lt;name&gt;</code> — the positional pasture name was silently
+                assigned to <code>source_branch</code> instead of <code>name</code> due to
+                swapped clap annotations in <code>SyncArgs</code>. The command fell back to
+                resolving the pasture from the current working directory, targeting the wrong
+                pasture. Fixed by making <code>name</code> the bare positional argument and
+                <code>source_branch</code> a <code>--source-branch</code> flag (consistent
+                with all other commands).
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                <code>cow materialise</code> on Linux — the materialise command lacked a
+                Linux implementation, causing a compile error on non-macOS targets. Now uses
+                <code>cp --reflink=always</code> with graceful fallback to a plain
+                <code>cp -R</code> (matching <code>cow create</code> behaviour).
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Internal</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag improved">test</span>
+                Integration test coverage improved from 78% to 87.6%. Dedicated test suites
+                added for <code>gc</code>, <code>stats</code>, <code>materialise</code>,
+                <code>migrate</code>, and <code>fetch-from</code>, covering the main happy
+                paths and key error branches in each command.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.6 -->
       <div class="release">
         <div class="release-meta">

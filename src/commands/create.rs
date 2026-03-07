@@ -856,15 +856,39 @@ fn selective_clone(
             std::os::unix::fs::symlink(&src_path, &dst_path)
                 .with_context(|| format!("Failed to symlink '{}'", src_path.display()))?;
         } else if dep_candidates.contains(&rel_buf) {
-            // Per-package symlinks: create a real dir, symlink each top-level entry.
+            // Per-package symlinks: create a real dir, then handle each entry.
+            //
+            // pnpm uses a virtual store: top-level node_modules entries are
+            // relative symlinks into .pnpm/ (e.g. next → .pnpm/next@x/node_modules/next).
+            // If we symlink them to the *source* copies (absolute paths), tools
+            // like Turbopack see them as crossing the pasture boundary and refuse
+            // to follow them. Detect pnpm by the presence of .pnpm/ and instead:
+            //   - whole-dir symlink .pnpm → source/.pnpm  (one pointer to the store)
+            //   - copy other relative symlinks verbatim so they resolve within
+            //     the pasture's own .pnpm/ tree, never leaving the pasture root.
             std::fs::create_dir_all(&dst_path)
                 .with_context(|| format!("Failed to create dir '{}'", dst_path.display()))?;
+            let is_pnpm = src_path.join(".pnpm").exists();
             for child in std::fs::read_dir(&src_path)
                 .with_context(|| format!("Failed to read dep dir '{}'", src_path.display()))?
             {
                 let child = child?;
-                std::os::unix::fs::symlink(child.path(), dst_path.join(child.file_name()))
-                    .with_context(|| format!("Failed to symlink package '{}'", child.path().display()))?;
+                let child_dst = dst_path.join(child.file_name());
+                if is_pnpm && child.file_name() == ".pnpm" {
+                    // Symlink the entire virtual store directory to the source.
+                    std::os::unix::fs::symlink(child.path(), &child_dst)
+                        .with_context(|| format!("Failed to symlink .pnpm '{}'", child.path().display()))?;
+                } else if is_pnpm && child.file_type()?.is_symlink() {
+                    // Copy the relative symlink verbatim — it resolves within
+                    // the pasture's own .pnpm/ rather than crossing the boundary.
+                    let target = std::fs::read_link(child.path())
+                        .with_context(|| format!("Failed to read symlink '{}'", child.path().display()))?;
+                    std::os::unix::fs::symlink(&target, &child_dst)
+                        .with_context(|| format!("Failed to recreate symlink '{}'", child_dst.display()))?;
+                } else {
+                    std::os::unix::fs::symlink(child.path(), &child_dst)
+                        .with_context(|| format!("Failed to symlink package '{}'", child.path().display()))?;
+                }
             }
         } else if entry.file_type()?.is_dir()
             && (whole_candidates.iter().any(|c| c.starts_with(rel) && c != rel)
@@ -933,10 +957,13 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
         return Ok(vcs::git_current_branch(workspace));
     };
 
-    // Try checkout, fall back to creating the branch
+    // Try checkout, fall back to creating the branch.
+    // Suppress stderr on the first attempt — a missing branch causes git to
+    // print "pathspec did not match" which is expected noise, not an error.
     let status = Command::new("git")
         .args(["checkout", branch])
         .current_dir(workspace)
+        .stderr(std::process::Stdio::null())
         .status()
         .context("Failed to run git checkout")?;
 

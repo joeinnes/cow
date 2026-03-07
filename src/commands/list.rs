@@ -1,8 +1,42 @@
 use anyhow::Result;
 use chrono::Utc;
 use colored::Colorize;
+use rayon::prelude::*;
 
-use crate::{cli::ListArgs, state::State, vcs::{self, Vcs}};
+use crate::{cli::ListArgs, state::{PastureEntry, State}, vcs::{self, Vcs}};
+
+struct PastureInfo {
+    branch:  String,
+    dirty:   bool,
+    count:   usize,
+}
+
+fn compute_info(w: &PastureEntry) -> PastureInfo {
+    let branch = match w.vcs {
+        Vcs::Git => vcs::git_current_branch(&w.path)
+            .unwrap_or_else(|| w.branch.clone().unwrap_or_default()),
+        // tarpaulin-ignore-start
+        Vcs::Jj => w.branch.clone().unwrap_or_default(),
+        // tarpaulin-ignore-end
+    };
+    let dirty = match w.vcs {
+        Vcs::Git => vcs::git_is_dirty(&w.path),
+        // tarpaulin-ignore-start
+        Vcs::Jj => vcs::jj_is_dirty(&w.path),
+        // tarpaulin-ignore-end
+    };
+    let count = if dirty {
+        match w.vcs {
+            Vcs::Git => vcs::git_status_short(&w.path).lines().count(),
+            // tarpaulin-ignore-start
+            Vcs::Jj => vcs::jj_diff_summary(&w.path).lines().filter(|l| !l.is_empty()).count(),
+            // tarpaulin-ignore-end
+        }
+    } else {
+        0
+    };
+    PastureInfo { branch, dirty, count }
+}
 
 pub fn run(args: ListArgs) -> Result<()> {
     let mut state = State::load()?;
@@ -20,24 +54,14 @@ pub fn run(args: ListArgs) -> Result<()> {
 
     workspaces.sort_by(|a, b| a.name.cmp(&b.name));
 
+    // Parallel: compute all git info up-front before any printing.
+    let infos: Vec<PastureInfo> = workspaces.par_iter().map(compute_info).collect();
+
     if args.json {
-        let out: Vec<serde_json::Value> = workspaces.iter().map(|w| {
-            let current_branch = match w.vcs {
-                Vcs::Git => vcs::git_current_branch(&w.path)
-                    .unwrap_or_else(|| w.branch.clone().unwrap_or_else(|| "-".to_string())),
-                // tarpaulin-ignore-start
-                Vcs::Jj => w.branch.clone().unwrap_or_else(|| "-".to_string()),
-                // tarpaulin-ignore-end
-            };
-            let dirty = match w.vcs {
-                Vcs::Git => vcs::git_is_dirty(&w.path),
-                // tarpaulin-ignore-start
-                Vcs::Jj => vcs::jj_is_dirty(&w.path),
-                // tarpaulin-ignore-end
-            };
+        let out: Vec<serde_json::Value> = workspaces.iter().zip(infos.iter()).map(|(w, info)| {
             let mut v = serde_json::to_value(w).unwrap();
-            v["dirty"] = serde_json::json!(dirty);
-            v["current_branch"] = serde_json::json!(current_branch);
+            v["dirty"]          = serde_json::json!(info.dirty);
+            v["current_branch"] = serde_json::json!(info.branch);
             v
         }).collect();
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -50,63 +74,36 @@ pub fn run(args: ListArgs) -> Result<()> {
     }
 
     // Column widths
-    const W_NAME: usize = 38;
+    const W_NAME:   usize = 38;
     const W_STATUS: usize = 12;
     const W_BRANCH: usize = 20;
 
-    // Determine whether any workspace has a branch worth showing.
-    let any_branch = workspaces.iter().any(|w| {
-        let branch = match w.vcs {
-            Vcs::Git => vcs::git_current_branch(&w.path)
-                .unwrap_or_else(|| w.branch.clone().unwrap_or_default()),
-            // tarpaulin-ignore-start
-            Vcs::Jj => w.branch.clone().unwrap_or_default(),
-            // tarpaulin-ignore-end
-        };
+    let any_branch = workspaces.iter().zip(infos.iter()).any(|(w, info)| {
         let suffix = w.name.rsplit('/').next().unwrap_or(&w.name);
-        !branch.is_empty() && branch != suffix
+        !info.branch.is_empty() && info.branch != suffix
     });
 
     if any_branch {
-        println!(
-            "{:<W_NAME$} {:<W_STATUS$} {:<W_BRANCH$} {}",
-            "NAME", "STATUS", "BRANCH", "CREATED"
-        );
+        if args.paths {
+            println!("{:<W_NAME$} {:<W_STATUS$} {:<W_BRANCH$} {:<15} {}", "NAME", "STATUS", "BRANCH", "CREATED", "PATH");
+        } else {
+            println!("{:<W_NAME$} {:<W_STATUS$} {:<W_BRANCH$} {}", "NAME", "STATUS", "BRANCH", "CREATED");
+        }
         println!("{}", "─".repeat(W_NAME + W_STATUS + W_BRANCH + 3 + 15));
+    } else if args.paths {
+        println!("{:<W_NAME$} {:<W_STATUS$} {:<15} {}", "NAME", "STATUS", "CREATED", "PATH");
+        println!("{}", "─".repeat(W_NAME + W_STATUS + 1 + 15));
     } else {
         println!("{:<W_NAME$} {:<W_STATUS$} {}", "NAME", "STATUS", "CREATED");
         println!("{}", "─".repeat(W_NAME + W_STATUS + 1 + 15));
     }
 
-    for w in &workspaces {
-        // Fetch current branch dynamically (may differ from stored branch)
-        let branch = match w.vcs {
-            Vcs::Git => vcs::git_current_branch(&w.path)
-                .unwrap_or_else(|| w.branch.clone().unwrap_or_default()),
-            // tarpaulin-ignore-start
-            Vcs::Jj => w.branch.clone().unwrap_or_default(),
-            // tarpaulin-ignore-end
-        };
-
-        let dirty = match w.vcs {
-            Vcs::Git => vcs::git_is_dirty(&w.path),
-            // tarpaulin-ignore-start
-            Vcs::Jj => vcs::jj_is_dirty(&w.path),
-            // tarpaulin-ignore-end
-        };
-
-        let (status_raw_len, status_str) = if dirty {
-            let count = match w.vcs {
-                Vcs::Git => vcs::git_status_short(&w.path).lines().count(),
-                // tarpaulin-ignore-start
-                Vcs::Jj => vcs::jj_diff_summary(&w.path).lines().filter(|l| !l.is_empty()).count(),
-                // tarpaulin-ignore-end
-            };
-            // jj's working copy is always a commit — use "changed" not "dirty"
+    for (w, info) in workspaces.iter().zip(infos.iter()) {
+        let (status_raw_len, status_str) = if info.dirty {
             let raw = match w.vcs {
-                Vcs::Git => format!("dirty ({})", count),
+                Vcs::Git => format!("dirty ({})", info.count),
                 // tarpaulin-ignore-start
-                Vcs::Jj => format!("changed ({})", count),
+                Vcs::Jj => format!("changed ({})", info.count),
                 // tarpaulin-ignore-end
             };
             let len = raw.len();
@@ -115,25 +112,26 @@ pub fn run(args: ListArgs) -> Result<()> {
             ("clean".len(), "clean".green().to_string())
         };
 
-        // Pad status manually since ANSI codes bloat the string length
         let status_padded = format!("{}{}", status_str, " ".repeat(W_STATUS.saturating_sub(status_raw_len)));
 
         let name_display = truncate_name(&w.name, W_NAME - 1);
         let ago = time_ago(w.created_at);
 
-        // Show branch only when it differs from the name suffix.
         let name_suffix = w.name.rsplit('/').next().unwrap_or(&w.name);
-        let branch_display = if !branch.is_empty() && branch != name_suffix {
-            branch.as_str()
+        let branch_display = if !info.branch.is_empty() && info.branch != name_suffix {
+            info.branch.as_str()
         } else {
             ""
         };
 
         if any_branch {
-            println!(
-                "{:<W_NAME$} {} {:<W_BRANCH$} {}",
-                name_display, status_padded, branch_display, ago
-            );
+            if args.paths {
+                println!("{:<W_NAME$} {} {:<W_BRANCH$} {:<15} {}", name_display, status_padded, branch_display, ago, w.path.display());
+            } else {
+                println!("{:<W_NAME$} {} {:<W_BRANCH$} {}", name_display, status_padded, branch_display, ago);
+            }
+        } else if args.paths {
+            println!("{:<W_NAME$} {} {:<15} {}", name_display, status_padded, ago, w.path.display());
         } else {
             println!("{:<W_NAME$} {} {}", name_display, status_padded, ago);
         }

@@ -173,15 +173,33 @@ fn clone_entry(src: &std::path::Path, dst: &std::path::Path) -> Result<()> {
         return Ok(());
     }
 
+    // tarpaulin-ignore-start
     #[cfg(not(target_os = "macos"))]
     {
-        let status = std::process::Command::new("cp")
-            .args(["-R", src.to_str().unwrap(), dst.to_str().unwrap()])
-            .status()
-            .context("Failed to run cp")?;
-        if !status.success() {
-            bail!("cp -R failed for '{}'", src.display());
+        // Linux: attempt copy-on-write via cp --reflink=always (btrfs, xfs).
+        // Fall back to a regular copy with a warning if the filesystem does not support it.
+        let reflink_status = std::process::Command::new("cp")
+            .args(["--reflink=always", "-R", src.to_str().unwrap(), dst.to_str().unwrap()])
+            .status();
+
+        match reflink_status {
+            Ok(s) if s.success() => return Ok(()),
+            _ => {
+                eprintln!(
+                    "Warning: filesystem does not support reflinks (btrfs/xfs required). \
+                     Falling back to a regular copy — disk overhead will be higher."
+                );
+                let _ = std::fs::remove_dir_all(dst);
+                let status = std::process::Command::new("cp")
+                    .args(["-R", src.to_str().unwrap(), dst.to_str().unwrap()])
+                    .status()
+                    .context("Failed to run cp")?;
+                if !status.success() {
+                    bail!("cp -R failed for '{}'", src.display());
+                }
+                Ok(())
+            }
         }
-        Ok(())
     }
+    // tarpaulin-ignore-end
 }
