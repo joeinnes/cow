@@ -1521,6 +1521,99 @@ mod tests {
         assert!(text.contains("submodule"), "should have merged stderr");
     }
 
+    // ─── remove: push offer (mai-lwfo) ─────────────────────────────────────────
+
+    /// Create a bare repo clone of `source` and wire it as the "origin" remote
+    /// of the given workspace directory.
+    fn add_origin_remote(workspace: &std::path::Path, bare_dir: &std::path::Path) {
+        // init bare repo
+        git(bare_dir, &["init", "--bare", "-b", "main"]);
+        // push initial commit from source into bare repo so origin/main exists
+        git(workspace, &["remote", "add", "origin", bare_dir.to_str().unwrap()]);
+        git(workspace, &["push", "-u", "origin", "HEAD"]);
+    }
+
+    #[test]
+    fn remove_warns_about_unpushed_commits_with_force() {
+        // --force should NOT block removal, but should warn on stderr.
+        let env = Env::new();
+        let source = make_git_repo();
+        let bare = TempDir::new().unwrap();
+
+        env.cow()
+            .args(["create", "push-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = env.home.join(".cow/workspaces/push-ws");
+        add_origin_remote(&ws, bare.path());
+
+        // Make a commit in the workspace that is NOT on origin.
+        std::fs::write(ws.join("new.txt"), "new").unwrap();
+        git(&ws, &["add", "."]);
+        git(&ws, &["commit", "-m", "workspace commit"]);
+
+        // --force should remove without prompting, but warn about unpushed commits.
+        env.cow()
+            .args(["remove", "--force", "push-ws"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("unpushed"))
+            .stdout(predicate::str::contains("Removed workspace"));
+    }
+
+    #[test]
+    fn remove_non_tty_warns_about_unpushed_and_removes() {
+        // Non-TTY (no --force, no interactive prompt): warn but still remove.
+        let env = Env::new();
+        let source = make_git_repo();
+        let bare = TempDir::new().unwrap();
+
+        env.cow()
+            .args(["create", "push-warn-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = env.home.join(".cow/workspaces/push-warn-ws");
+        add_origin_remote(&ws, bare.path());
+
+        std::fs::write(ws.join("new.txt"), "new").unwrap();
+        git(&ws, &["add", "."]);
+        git(&ws, &["commit", "-m", "workspace commit"]);
+
+        // Non-TTY stdin: should warn on stderr and proceed with removal.
+        env.cow()
+            .args(["remove", "push-warn-ws"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("unpushed"))
+            .stdout(predicate::str::contains("Removed workspace"));
+    }
+
+    #[test]
+    fn remove_no_unpushed_commits_skips_push_logic() {
+        // When workspace is up to date with origin, no warning should appear.
+        let env = Env::new();
+        let source = make_git_repo();
+        let bare = TempDir::new().unwrap();
+
+        env.cow()
+            .args(["create", "synced-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let ws = env.home.join(".cow/workspaces/synced-ws");
+        add_origin_remote(&ws, bare.path());
+
+        // Nothing committed after push → zero unpushed commits.
+        env.cow()
+            .args(["remove", "--force", "synced-ws"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed workspace"));
+        // stderr should NOT contain "unpushed"
+    }
+
     // ─── jj helpers ────────────────────────────────────────────────────────────
 
     /// Initialise a colocated jj+git repo with one committed change, leaving
