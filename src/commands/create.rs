@@ -61,12 +61,21 @@ pub fn run(args: CreateArgs) -> Result<()> {
     };
 
     // Workspace name
+    let name_was_given = args.name.is_some();
     let name = match args.name {
         Some(n) => {
             validate_name(&n)?;
             n
         }
         None => state.next_agent_name(),
+    };
+
+    // Default: use workspace name as branch when the caller gave an explicit name
+    // and did not pass --branch or --no-branch.
+    let branch_arg = if args.branch.is_none() && !args.no_branch && name_was_given {
+        Some(name.clone())
+    } else {
+        args.branch
     };
 
     // Uniqueness check
@@ -101,7 +110,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
 
     // VCS post-clone setup
     let branch = match detected_vcs {
-        Vcs::Git => setup_git(&dest, args.branch.as_deref())?,
+        Vcs::Git => setup_git(&dest, branch_arg.as_deref())?,
         // tarpaulin-ignore-start
         Vcs::Jj => {
             setup_jj(&dest, args.change.as_deref())?;
