@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "swt",
+    name = "cow",
     about = "Copy-on-write workspace manager for parallel development",
     version
 )]
@@ -26,6 +26,8 @@ pub enum Commands {
     Diff(DiffArgs),
     /// Extract changes from a workspace as a patch or branch
     Extract(ExtractArgs),
+    /// Run as a Model Context Protocol (MCP) stdio server
+    Mcp,
 }
 
 #[derive(clap::Args, Debug)]
@@ -45,7 +47,7 @@ pub struct CreateArgs {
     #[arg(long)]
     pub change: Option<String>,
 
-    /// Parent directory for workspaces (defaults to ~/.swt/workspaces/)
+    /// Parent directory for workspaces (defaults to ~/.cow/workspaces/)
     #[arg(long)]
     pub dir: Option<PathBuf>,
 

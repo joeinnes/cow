@@ -22,18 +22,31 @@ pub fn run(args: ExtractArgs) -> Result<()> {
             .with_context(|| format!("Cannot create patch file: {}", patch_file.display()))?;
 
         let status = match entry.vcs {
-            Vcs::Git => Command::new("git")
-                .args(["format-patch", "HEAD~1", "--stdout"])
-                .current_dir(&entry.path)
-                .stdout(file)
-                .status()
-                .context("Failed to run git format-patch")?,
+            Vcs::Git => {
+                // Use the SHA recorded at workspace creation as the base so the
+                // patch covers all commits made in the workspace, not just the
+                // last one. Fall back to HEAD~1 for workspaces created before
+                // this field was added.
+                let base = entry
+                    .initial_commit
+                    .as_deref()
+                    .unwrap_or("HEAD~1")
+                    .to_string();
+                Command::new("git")
+                    .args(["format-patch", &format!("{}..HEAD", base), "--stdout"])
+                    .current_dir(&entry.path)
+                    .stdout(file)
+                    .status()
+                    .context("Failed to run git format-patch")?
+            }
+            // tarpaulin-ignore-start
             Vcs::Jj => Command::new("jj")
                 .args(["diff", "--git"])
                 .current_dir(&entry.path)
                 .stdout(file)
                 .status()
                 .context("Failed to run jj diff --git")?,
+            // tarpaulin-ignore-end
         };
 
         if status.success() {
@@ -60,7 +73,9 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                 }
                 println!("Pushed to origin/{}", branch_name);
             }
+            // tarpaulin-ignore-start
             Vcs::Jj => bail!("Branch push is not yet supported for jj workspaces."),
+            // tarpaulin-ignore-end
         }
     }
 

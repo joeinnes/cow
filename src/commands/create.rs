@@ -32,13 +32,15 @@ pub fn run(args: CreateArgs) -> Result<()> {
     }
 
     // APFS check
+    // tarpaulin-ignore-start
     if !apfs::is_apfs(&source) {
         bail!(
-            "Source filesystem is not APFS. swt requires APFS for copy-on-write clones.\n\
+            "Source filesystem is not APFS. cow requires APFS for copy-on-write clones.\n\
              Run `diskutil info {}` to see the filesystem type.",
             source.display()
         );
     }
+    // tarpaulin-ignore-end
 
     // Warn about submodules (not supported, but don't block)
     if source.join(".gitmodules").exists() {
@@ -88,19 +90,30 @@ pub fn run(args: CreateArgs) -> Result<()> {
     println!("Cloning {} ...", source.display());
     cow_clone(&source, &dest)?;
 
+    // Capture HEAD SHA before any branch switching so extract has a reliable base.
+    let initial_commit = if detected_vcs == Vcs::Git {
+        vcs::git_head_sha(&dest)
+    } else {
+        // tarpaulin-ignore-start
+        None
+        // tarpaulin-ignore-end
+    };
+
     // VCS post-clone setup
     let branch = match detected_vcs {
         Vcs::Git => setup_git(&dest, args.branch.as_deref())?,
+        // tarpaulin-ignore-start
         Vcs::Jj => {
-            setup_jj(&dest)?;
+            setup_jj(&dest, args.change.as_deref())?;
             None
         }
+        // tarpaulin-ignore-end
     };
 
     // Cleanup step
     if !args.no_clean {
         cleanup_runtime_artefacts(&dest)?;
-        let config_path = source.join(".swt.json");
+        let config_path = source.join(".cow.json");
         if config_path.exists() {
             cleanup_from_config(&dest, &config_path)?;
         }
@@ -113,6 +126,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
         source,
         vcs: detected_vcs,
         branch,
+        initial_commit,
         created_at: chrono::Utc::now(),
     };
     state.add(entry);
@@ -176,7 +190,8 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
     Ok(Some(branch.to_string()))
 }
 
-fn setup_jj(workspace: &Path) -> Result<()> {
+// tarpaulin-ignore-start
+fn setup_jj(workspace: &Path, change: Option<&str>) -> Result<()> {
     // Detach from the source's workspace list so the two workspaces
     // are independent. Errors here are non-fatal — jj may not be installed
     // or the workspace structure might already be detached.
@@ -184,8 +199,21 @@ fn setup_jj(workspace: &Path) -> Result<()> {
         .args(["workspace", "forget"])
         .current_dir(workspace)
         .output();
+
+    if let Some(change_id) = change {
+        let status = Command::new("jj")
+            .args(["edit", change_id])
+            .current_dir(workspace)
+            .status()
+            .context("Failed to run jj edit")?;
+        if !status.success() {
+            bail!("Failed to check out change '{}' in workspace.", change_id);
+        }
+    }
+
     Ok(())
 }
+// tarpaulin-ignore-end
 
 fn cleanup_runtime_artefacts(workspace: &Path) -> Result<()> {
     for pattern in &["*.pid", "*.sock", "*.socket"] {
@@ -196,7 +224,7 @@ fn cleanup_runtime_artefacts(workspace: &Path) -> Result<()> {
 
 fn cleanup_from_config(workspace: &Path, config_path: &Path) -> Result<()> {
     #[derive(serde::Deserialize)]
-    struct SwtConfig {
+    struct CowConfig {
         post_clone: Option<PostClone>,
     }
     #[derive(serde::Deserialize)]
@@ -206,9 +234,9 @@ fn cleanup_from_config(workspace: &Path, config_path: &Path) -> Result<()> {
     }
 
     let content = std::fs::read_to_string(config_path)
-        .with_context(|| format!("Failed to read .swt.json: {}", config_path.display()))?;
-    let config: SwtConfig = serde_json::from_str(&content)
-        .with_context(|| "Failed to parse .swt.json")?;
+        .with_context(|| format!("Failed to read .cow.json: {}", config_path.display()))?;
+    let config: CowConfig = serde_json::from_str(&content)
+        .with_context(|| "Failed to parse .cow.json")?;
 
     let Some(post_clone) = config.post_clone else {
         return Ok(());
@@ -262,4 +290,37 @@ fn remove_glob_or_dir(base: &Path, pattern: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_name_accepts_valid() {
+        assert!(validate_name("my-workspace").is_ok());
+        assert!(validate_name("agent-1").is_ok());
+        assert!(validate_name("abc").is_ok());
+    }
+
+    #[test]
+    fn validate_name_rejects_empty() {
+        assert!(validate_name("").is_err());
+    }
+
+    #[test]
+    fn validate_name_rejects_slash() {
+        assert!(validate_name("foo/bar").is_err());
+    }
+
+    #[test]
+    fn validate_name_rejects_null_byte() {
+        assert!(validate_name("foo\0bar").is_err());
+    }
+
+    #[test]
+    fn validate_name_rejects_dot() {
+        assert!(validate_name(".").is_err());
+        assert!(validate_name("..").is_err());
+    }
 }

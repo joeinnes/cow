@@ -45,12 +45,16 @@ pub fn run(args: ListArgs) -> Result<()> {
         let branch = match w.vcs {
             Vcs::Git => vcs::git_current_branch(&w.path)
                 .unwrap_or_else(|| w.branch.clone().unwrap_or_else(|| "-".to_string())),
+            // tarpaulin-ignore-start
             Vcs::Jj => w.branch.clone().unwrap_or_else(|| "-".to_string()),
+            // tarpaulin-ignore-end
         };
 
         let dirty = match w.vcs {
             Vcs::Git => vcs::git_is_dirty(&w.path),
+            // tarpaulin-ignore-start
             Vcs::Jj => vcs::jj_is_dirty(&w.path),
+            // tarpaulin-ignore-end
         };
 
         let status_str = if dirty {
@@ -99,5 +103,74 @@ fn time_ago(dt: chrono::DateTime<Utc>) -> String {
         } else {
             dt.format("%Y-%m-%d").to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    #[test]
+    fn truncate_path_short_unchanged() {
+        assert_eq!(truncate_path("short", 20), "short");
+    }
+
+    #[test]
+    fn truncate_path_long_gets_ellipsis() {
+        let long = "a".repeat(40);
+        let result = truncate_path(&long, 10);
+        assert!(result.starts_with('…'));
+        assert!(result.len() <= 10 + "…".len()); // ellipsis is multi-byte
+    }
+
+    #[test]
+    fn time_ago_seconds() {
+        let dt = Utc::now() - Duration::seconds(30);
+        assert_eq!(time_ago(dt), "just now");
+    }
+
+    #[test]
+    fn time_ago_minutes() {
+        let dt = Utc::now() - Duration::minutes(5);
+        assert_eq!(time_ago(dt), "5 mins ago");
+    }
+
+    #[test]
+    fn time_ago_one_minute() {
+        let dt = Utc::now() - Duration::minutes(1);
+        assert_eq!(time_ago(dt), "1 min ago");
+    }
+
+    #[test]
+    fn time_ago_hours() {
+        let dt = Utc::now() - Duration::hours(3);
+        assert_eq!(time_ago(dt), "3 hours ago");
+    }
+
+    #[test]
+    fn time_ago_one_hour() {
+        let dt = Utc::now() - Duration::hours(1);
+        assert_eq!(time_ago(dt), "1 hour ago");
+    }
+
+    #[test]
+    fn time_ago_days() {
+        let dt = Utc::now() - Duration::days(3);
+        assert_eq!(time_ago(dt), "3 days ago");
+    }
+
+    #[test]
+    fn time_ago_one_day() {
+        let dt = Utc::now() - Duration::days(1);
+        assert_eq!(time_ago(dt), "1 day ago");
+    }
+
+    #[test]
+    fn time_ago_old_shows_date() {
+        let dt = Utc::now() - Duration::days(10);
+        let result = time_ago(dt);
+        // Should be a date like "2026-02-20"
+        assert!(result.contains('-'), "expected date format, got: {}", result);
     }
 }

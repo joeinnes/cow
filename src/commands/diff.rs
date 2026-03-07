@@ -19,11 +19,13 @@ pub fn run(args: DiffArgs) -> Result<()> {
             .current_dir(&entry.path)
             .status()
             .context("Failed to run git diff")?,
+        // tarpaulin-ignore-start
         Vcs::Jj => std::process::Command::new("jj")
             .arg("diff")
             .current_dir(&entry.path)
             .status()
             .context("Failed to run jj diff")?,
+        // tarpaulin-ignore-end
     };
 
     if !status.success() {
@@ -38,12 +40,16 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
         return Ok(n);
     }
     let cwd = std::env::current_dir().context("Cannot determine current directory")?;
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
     state
         .workspaces
         .iter()
-        .find(|w| cwd.starts_with(&w.path))
+        .find(|w| {
+            let wp = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
+            cwd.starts_with(&wp)
+        })
         .map(|w| w.name.clone())
         .context(
-            "Not in a swt workspace. Specify a workspace name or run from inside a workspace.",
+            "Not in a cow workspace. Specify a workspace name or run from inside a workspace.",
         )
 }

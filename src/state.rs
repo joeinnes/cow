@@ -13,6 +13,11 @@ pub struct WorkspaceEntry {
     pub vcs: Vcs,
     /// The branch that was active at creation time (git only).
     pub branch: Option<String>,
+    /// The HEAD SHA at the moment the workspace was cloned (git only).
+    /// Used by `cow extract --patch` to produce a complete patch regardless
+    /// of how many commits have been made in the workspace since.
+    #[serde(default)]
+    pub initial_commit: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -77,10 +82,10 @@ impl State {
 
 pub fn state_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
-    Ok(home.join(".swt").join("state.json"))
+    Ok(home.join(".cow").join("state.json"))
 }
 
 pub fn default_workspace_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Cannot determine home directory")?;
-    Ok(home.join(".swt").join("workspaces"))
+    Ok(home.join(".cow").join("workspaces"))
 }

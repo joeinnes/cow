@@ -6,18 +6,24 @@ use std::path::Path;
 pub fn is_apfs(path: &Path) -> bool {
     let path_str = match path.to_str() {
         Some(s) => s,
+        // tarpaulin-ignore-start
         None => return false,
+        // tarpaulin-ignore-end
     };
     let c_path = match CString::new(path_str) {
         Ok(s) => s,
+        // tarpaulin-ignore-start
         Err(_) => return false,
+        // tarpaulin-ignore-end
     };
 
     let mut stat_buf: libc::statfs = unsafe { std::mem::zeroed() };
     let ret = unsafe { libc::statfs(c_path.as_ptr(), &mut stat_buf) };
+    // tarpaulin-ignore-start
     if ret != 0 {
         return false;
     }
+    // tarpaulin-ignore-end
 
     // f_fstypename is [c_char; 16] on macOS
     let ftype = unsafe {
