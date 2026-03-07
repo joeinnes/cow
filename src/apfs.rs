@@ -4,6 +4,12 @@ use std::path::Path;
 /// Returns true if the given path resides on an APFS filesystem.
 /// Uses the `statfs(2)` syscall directly to avoid any shell dependency.
 pub fn is_apfs(path: &Path) -> bool {
+    // Allow test harnesses to simulate a non-APFS environment without
+    // needing a real non-APFS volume.
+    if std::env::var_os("COW_TEST_NOT_APFS").is_some() {
+        return false;
+    }
+
     let path_str = match path.to_str() {
         Some(s) => s,
         // tarpaulin-ignore-start
@@ -43,5 +49,16 @@ mod tests {
     fn home_dir_is_apfs() {
         let home = dirs::home_dir().unwrap();
         assert!(is_apfs(&home), "Home directory should be on APFS on a modern Mac");
+    }
+
+    #[test]
+    fn returns_false_when_env_var_set() {
+        // Uses a temp dir to avoid touching the real FS.
+        let dir = tempfile::TempDir::new().unwrap();
+        // Set for this check, then immediately clear so parallel tests are unaffected.
+        std::env::set_var("COW_TEST_NOT_APFS", "1");
+        let result = is_apfs(dir.path());
+        std::env::remove_var("COW_TEST_NOT_APFS");
+        assert!(!result);
     }
 }

@@ -27,6 +27,15 @@ mod tests {
         fn new() -> Self {
             let dir = TempDir::new().expect("temp home dir");
             let home = dir.path().to_path_buf();
+
+            // Write minimal jj config so `jj` commands work when HOME is overridden.
+            let jj_cfg = home.join(".config/jj");
+            std::fs::create_dir_all(&jj_cfg).expect("create jj config dir");
+            std::fs::write(
+                jj_cfg.join("config.toml"),
+                "[user]\nemail = \"test@cow.test\"\nname = \"cow-test\"\n",
+            ).expect("write jj config");
+
             Self { _home: dir, home }
         }
 
@@ -1445,6 +1454,493 @@ mod tests {
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains("Created workspace"), "should have stdout");
         assert!(text.contains("submodule"), "should have merged stderr");
+    }
+
+    // ─── jj helpers ────────────────────────────────────────────────────────────
+
+    /// Initialise a colocated jj+git repo with one committed change, leaving
+    /// the working copy clean (so `jj diff --summary` returns nothing).
+    fn make_jj_repo(home: &Path) -> TempDir {
+        let dir = TempDir::new().expect("temp jj repo");
+        let path = dir.path();
+        jj_run(home, path, &["git", "init", "--colocate"]);
+        std::fs::write(path.join("hello.txt"), "hello").unwrap();
+        jj_run(home, path, &["describe", "-m", "initial"]);
+        // Create a new empty change on top so the working copy is clean.
+        jj_run(home, path, &["new"]);
+        dir
+    }
+
+    fn jj_run(home: &Path, path: &Path, args: &[&str]) {
+        let status = std::process::Command::new("jj")
+            .args(args)
+            .current_dir(path)
+            .env("HOME", home)
+            .status()
+            .unwrap_or_else(|_| panic!("could not run jj"));
+        assert!(status.success(), "jj {:?} failed in {}", args, path.display());
+    }
+
+    // ─── command-failure stub helpers ──────────────────────────────────────────
+
+    /// Write a shell script that always exits 1.
+    fn make_failing_stub(dir: &Path, name: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Write a git wrapper that passes through everything except `checkout`,
+    /// which always exits 1.  This exercises the "checkout -b also fails" path.
+    fn make_git_checkout_fail_stub(dir: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let real_git = std::process::Command::new("which")
+            .arg("git")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_else(|_| "/usr/bin/git".to_string());
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"checkout\" ]; then exit 1; fi\nexec {real_git} \"$@\"\n"
+        );
+        let path = dir.join("git");
+        std::fs::write(&path, &script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn prepend_path(extra: &Path) -> String {
+        let orig = std::env::var("PATH").unwrap_or_default();
+        format!("{}:{}", extra.display(), orig)
+    }
+
+    // ─── jj tests ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn create_jj_workspace() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Created workspace 'jj-ws'"));
+
+        assert!(env.home.join(".cow/workspaces/jj-ws").exists());
+        assert!(env.home.join(".cow/workspaces/jj-ws/.jj").exists());
+    }
+
+    #[test]
+    fn list_jj_workspace() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-list", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .arg("list")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("jj-list"))
+            .stdout(predicate::str::contains("jj"));
+    }
+
+    #[test]
+    fn status_jj_clean() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-status", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["status", "jj-status"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("VCS:        jj"))
+            .stdout(predicate::str::contains("Status:     clean"));
+    }
+
+    #[test]
+    fn status_jj_dirty() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-dirty", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Modify a tracked file to make the working copy dirty.
+        std::fs::write(
+            env.home.join(".cow/workspaces/jj-dirty/hello.txt"),
+            "modified content",
+        )
+        .unwrap();
+
+        env.cow()
+            .args(["status", "jj-dirty"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Status:     dirty"));
+    }
+
+    #[test]
+    fn diff_jj_workspace() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-diff", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Modify a file so there is something to show.
+        std::fs::write(
+            env.home.join(".cow/workspaces/jj-diff/hello.txt"),
+            "modified",
+        )
+        .unwrap();
+
+        env.cow().args(["diff", "jj-diff"]).assert().success();
+    }
+
+    #[test]
+    fn remove_jj_force() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-remove", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["remove", "--force", "jj-remove"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Removed workspace 'jj-remove'"));
+
+        assert!(!env.home.join(".cow/workspaces/jj-remove").exists());
+    }
+
+    #[test]
+    fn remove_jj_dirty_note() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-dirty-rm", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Make the workspace dirty.
+        std::fs::write(
+            env.home.join(".cow/workspaces/jj-dirty-rm/hello.txt"),
+            "changed",
+        )
+        .unwrap();
+
+        env.cow()
+            .args(["remove", "--force", "jj-dirty-rm"])
+            .assert()
+            .success()
+            .stderr(predicate::str::contains("has modifications"))
+            .stdout(predicate::str::contains("Removed workspace"));
+    }
+
+    #[test]
+    fn extract_jj_patch() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-patch", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Add a change so the patch is non-empty.
+        std::fs::write(
+            env.home.join(".cow/workspaces/jj-patch/hello.txt"),
+            "patched content",
+        )
+        .unwrap();
+
+        let patch_file = env.home.join("test.patch");
+        env.cow()
+            .args([
+                "extract",
+                "jj-patch",
+                "--patch",
+                patch_file.to_str().unwrap(),
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Patch written to"));
+
+        assert!(patch_file.exists());
+    }
+
+    #[test]
+    fn extract_jj_branch_fails() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-branch", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        env.cow()
+            .args(["extract", "jj-branch", "--branch", "some-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not yet supported for jj"));
+    }
+
+    // ─── command-failure tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn create_cp_failure_gives_error() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let stub_dir = TempDir::new().expect("stub dir");
+        make_failing_stub(stub_dir.path(), "cp");
+
+        env.cow()
+            .args(["create", "fail-ws", "--source", source.path().to_str().unwrap()])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("cp -rc failed"));
+    }
+
+    #[test]
+    fn create_branch_checkout_failure() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let stub_dir = TempDir::new().expect("stub dir");
+        make_git_checkout_fail_stub(stub_dir.path());
+
+        env.cow()
+            .args([
+                "create",
+                "branch-fail-ws",
+                "--source",
+                source.path().to_str().unwrap(),
+                "--branch",
+                "new-branch",
+            ])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to check out branch"));
+    }
+
+    // ─── non-APFS test ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn create_non_apfs_source_gives_error() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "apfs-fail", "--source", source.path().to_str().unwrap()])
+            .env("COW_TEST_NOT_APFS", "1")
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not APFS"));
+    }
+
+    // ─── additional coverage ───────────────────────────────────────────────────
+
+    #[test]
+    fn list_shows_dirty_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "dirty-list-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Add an untracked file to make the workspace dirty.
+        std::fs::write(
+            env.home.join(".cow/workspaces/dirty-list-ws/untracked.txt"),
+            "new file",
+        )
+        .unwrap();
+
+        env.cow()
+            .arg("list")
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("dirty"));
+    }
+
+    #[test]
+    fn remove_jj_without_force_defaults_to_no() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-no-force", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Without --force on a jj workspace, confirm_or_default is called.
+        // Non-TTY stdin defaults to no → workspace is NOT removed.
+        env.cow()
+            .args(["remove", "jj-no-force"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No workspaces were removed"));
+
+        assert!(env.home.join(".cow/workspaces/jj-no-force").exists());
+    }
+
+    #[test]
+    fn create_jj_with_change() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        // Get the change ID of the parent of the working copy ("initial" change).
+        let output = std::process::Command::new("jj")
+            .args(["log", "--no-graph", "-r", "@-", "-T", "change_id"])
+            .current_dir(source.path())
+            .env("HOME", &env.home)
+            .output()
+            .expect("jj log failed");
+        let change_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        assert!(!change_id.is_empty(), "could not get change ID from jj log");
+
+        env.cow()
+            .args([
+                "create",
+                "jj-with-change",
+                "--source",
+                source.path().to_str().unwrap(),
+                "--change",
+                &change_id,
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Created workspace 'jj-with-change'"));
+    }
+
+    #[test]
+    fn create_jj_with_invalid_change_fails() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args([
+                "create",
+                "jj-bad-change",
+                "--source",
+                source.path().to_str().unwrap(),
+                "--change",
+                "this-is-not-a-valid-change-id",
+            ])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to check out change"));
+    }
+
+    #[test]
+    fn diff_git_command_failure() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "diff-fail-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Stub git so `git diff` exits 1.
+        let stub_dir = TempDir::new().expect("stub dir");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let real_git = std::process::Command::new("which")
+                .arg("git")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "/usr/bin/git".to_string());
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"diff\" ]; then exit 1; fi\nexec {real_git} \"$@\"\n"
+            );
+            let stub_path = stub_dir.path().join("git");
+            std::fs::write(&stub_path, &script).unwrap();
+            std::fs::set_permissions(&stub_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        env.cow()
+            .args(["diff", "diff-fail-ws"])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Diff command exited with status"));
+    }
+
+    #[test]
+    fn extract_jj_patch_command_failure() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-patch-fail", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Stub jj so `jj diff` exits 1 → patch bail is triggered.
+        let stub_dir = TempDir::new().expect("stub dir");
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let real_jj = std::process::Command::new("which")
+                .arg("jj")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_else(|_| "/usr/local/bin/jj".to_string());
+            let script = format!(
+                "#!/bin/sh\nif [ \"$1\" = \"diff\" ]; then exit 1; fi\nexec {real_jj} \"$@\"\n"
+            );
+            let stub_path = stub_dir.path().join("jj");
+            std::fs::write(&stub_path, &script).unwrap();
+            std::fs::set_permissions(&stub_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let patch_file = env.home.join("fail.patch");
+        env.cow()
+            .args(["extract", "jj-patch-fail", "--patch", patch_file.to_str().unwrap()])
+            .env("PATH", prepend_path(stub_dir.path()))
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Patch command failed"));
+    }
+
+    #[test]
+    fn extract_branch_fails_when_no_remote() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "no-remote-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // No "origin" remote is configured → git push exits non-zero → bail.
+        env.cow()
+            .args(["extract", "no-remote-ws", "--branch", "feature-branch"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("Failed to push to branch"));
     }
 
     #[test]
