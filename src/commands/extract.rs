@@ -59,22 +59,44 @@ pub fn run(args: ExtractArgs) -> Result<()> {
     if let Some(branch_name) = args.branch {
         match entry.vcs {
             Vcs::Git => {
-                let status = Command::new("git")
-                    .args([
-                        "push",
-                        "origin",
-                        &format!("HEAD:{}", branch_name),
-                    ])
-                    .current_dir(&entry.path)
+                let source = &entry.source;
+                let remote_name = format!("cow-tmp-{}", args.name);
+
+                // Register the workspace as a temporary local remote in the source repo.
+                let add_status = Command::new("git")
+                    .args(["remote", "add", &remote_name, entry.path.to_str().unwrap()])
+                    .current_dir(source)
                     .status()
-                    .context("Failed to run git push")?;
-                if !status.success() {
-                    bail!("Failed to push to branch '{}' on origin.", branch_name);
+                    .context("Failed to add temporary remote")?;
+                if !add_status.success() {
+                    bail!("Failed to register workspace as a temporary remote in source repo.");
                 }
-                println!("Pushed to origin/{}", branch_name);
+
+                // Fetch workspace HEAD into source as the named branch.
+                let fetch_status = Command::new("git")
+                    .args(["fetch", &remote_name, &format!("HEAD:{}", branch_name)])
+                    .current_dir(source)
+                    .status()
+                    .context("Failed to fetch from workspace")?;
+
+                // Always remove the temporary remote, even on failure.
+                let _ = Command::new("git")
+                    .args(["remote", "remove", &remote_name])
+                    .current_dir(source)
+                    .status();
+
+                if !fetch_status.success() {
+                    bail!("Failed to create branch '{}' in source repo.", branch_name);
+                }
+
+                println!(
+                    "Branch '{}' created in source repo at {}",
+                    branch_name,
+                    source.display()
+                );
             }
             // tarpaulin-ignore-start
-            Vcs::Jj => bail!("Branch push is not yet supported for jj workspaces."),
+            Vcs::Jj => bail!("Branch extraction is not yet supported for jj workspaces."),
             // tarpaulin-ignore-end
         }
     }
