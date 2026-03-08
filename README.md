@@ -17,7 +17,8 @@ On APFS (the default on every modern Mac), `cp -rc` creates an instant block-lev
 ## Install
 
 ```sh
-brew install joeinn.es/tap/cow
+brew tap joeinnes/tap
+brew install cow
 ```
 
 Or build from source:
