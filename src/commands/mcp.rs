@@ -138,13 +138,57 @@ fn tools_list() -> Value {
         },
         {
             "name": "cow_status",
-            "description": "Show detailed status of a workspace: path, branch, VCS dirty/clean state, and list of changed files.",
+            "description": "Show detailed status of a workspace as JSON: path, branch, VCS dirty/clean state, modified files, initial_commit, and created_at.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
                         "description": "Workspace name"
+                    }
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "cow_sync",
+            "description": "Fetch the latest commits from the source repository and rebase (or merge) the workspace onto them. No network access required.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Workspace name"
+                    },
+                    "source_branch": {
+                        "type": "string",
+                        "description": "Branch in the source repo to sync from (defaults to workspace's current branch)"
+                    },
+                    "merge": {
+                        "type": "boolean",
+                        "description": "Use merge instead of rebase"
+                    }
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "cow_extract",
+            "description": "Extract changes from a workspace. Use --branch to create a local branch in the source repo, or --patch to write a patch file.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Workspace name"
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Create this branch in the source repo at workspace HEAD"
+                    },
+                    "patch": {
+                        "type": "string",
+                        "description": "Write changes as a patch file at this path"
                     }
                 },
                 "required": ["name"]
@@ -203,9 +247,37 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
         }
         "cow_status" => {
             let mut cmd = std::process::Command::new(&exe);
-            cmd.arg("status");
+            cmd.args(["status", "--json"]);
             if let Some(n) = args["name"].as_str() {
                 cmd.arg(n);
+            }
+            cmd.output()?
+        }
+        "cow_sync" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("sync");
+            if let Some(b) = args["source_branch"].as_str() {
+                cmd.arg(b);
+            }
+            if let Some(n) = args["name"].as_str() {
+                cmd.args(["--name", n]);
+            }
+            if args["merge"].as_bool().unwrap_or(false) {
+                cmd.arg("--merge");
+            }
+            cmd.output()?
+        }
+        "cow_extract" => {
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("extract");
+            if let Some(n) = args["name"].as_str() {
+                cmd.arg(n);
+            }
+            if let Some(b) = args["branch"].as_str() {
+                cmd.args(["--branch", b]);
+            }
+            if let Some(p) = args["patch"].as_str() {
+                cmd.args(["--patch", p]);
             }
             cmd.output()?
         }
