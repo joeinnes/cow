@@ -93,6 +93,18 @@ Remove one or more workspaces. Warns before removing workspaces with uncommitted
 | `--all` | Remove all workspaces |
 | `--source <PATH>` | Scope `--all` to this source |
 
+### `cow cd <NAME>`
+
+Print the absolute path of a workspace. Designed for shell integration:
+
+```sh
+# Add to ~/.zshrc or ~/.bashrc
+function cowcd() { cd "$(cow cd "$1")"; }
+
+# Then:
+cowcd feature-x
+```
+
 ### `cow sync [SOURCE_BRANCH]`
 
 Fetch the latest commits from the source repository and rebase the workspace onto them. Defaults to syncing with the workspace's own branch; pass a branch name to sync with a different one (e.g. `cow sync main`).

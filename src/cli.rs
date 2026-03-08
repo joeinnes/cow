@@ -26,6 +26,8 @@ pub enum Commands {
     Diff(DiffArgs),
     /// Extract changes from a workspace as a patch or branch
     Extract(ExtractArgs),
+    /// Print the path of a workspace (for shell cd integration)
+    Cd(CdArgs),
     /// Sync a workspace with its source repository
     Sync(SyncArgs),
     /// Run as a Model Context Protocol (MCP) stdio server
@@ -106,6 +108,12 @@ pub struct StatusArgs {
 pub struct DiffArgs {
     /// Workspace name (defaults to current directory if it is a workspace)
     pub name: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CdArgs {
+    /// Workspace name
+    pub name: String,
 }
 
 #[derive(clap::Args, Debug)]

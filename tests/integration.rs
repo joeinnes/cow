@@ -1279,6 +1279,46 @@ mod tests {
         assert!(!rebase_dir.exists(), "rebase-merge dir should be absent after auto-abort");
     }
 
+    // ─── cd ────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn cd_prints_workspace_path() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "cd-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let expected = env.home.join(".cow/workspaces/cd-ws");
+
+        let raw = env.cow()
+            .args(["cd", "cd-ws"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let printed = String::from_utf8_lossy(&raw).trim().to_string();
+        // Canonicalise both sides to handle /var vs /private/var on macOS.
+        let printed_canon = std::fs::canonicalize(&printed).unwrap_or_else(|_| printed.clone().into());
+        let expected_canon = std::fs::canonicalize(&expected).unwrap_or(expected);
+        assert_eq!(printed_canon, expected_canon);
+    }
+
+    #[test]
+    fn cd_not_found() {
+        let env = Env::new();
+
+        env.cow()
+            .args(["cd", "no-such-workspace"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("not found"));
+    }
+
     // ─── mcp ───────────────────────────────────────────────────────────────────
 
     #[test]
