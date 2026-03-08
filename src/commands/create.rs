@@ -32,6 +32,15 @@ pub fn run(args: CreateArgs) -> Result<()> {
         );
     }
 
+    // Reject secondary jj workspaces as sources
+    if detected_vcs == Vcs::Jj && vcs::is_jj_secondary_workspace(&source) {
+        bail!(
+            "Source '{}' is a jj workspace, not a primary repository.\n\
+             Please use the main (primary) repository as --source instead.",
+            source.display()
+        );
+    }
+
     // APFS check (macOS only — on Linux we attempt reflink and fall back gracefully)
     // tarpaulin-ignore-start
     #[cfg(target_os = "macos")]
@@ -99,7 +108,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
 
     // CoW clone
     println!("Cloning {} ...", source.display());
-    cow_clone(&source, &dest)?;
+    cow_clone(&source, &dest, &detected_vcs)?;
 
     // Capture HEAD SHA before any branch switching so extract has a reliable base.
     let initial_commit = if detected_vcs == Vcs::Git {
@@ -195,9 +204,61 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn cow_clone(source: &Path, dest: &Path) -> Result<()> {
+/// Copies every top-level entry from `source` to `dest` except `.jj/`, using
+/// `cp -rc` (clonefile(2) on APFS) for each entry.
+#[cfg(target_os = "macos")]
+fn jj_copy_working_tree(source: &Path, dest: &Path) -> Result<()> {
+    std::fs::create_dir_all(dest)
+        .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
+
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("Failed to read source directory: {}", source.display()))?
+    {
+        let entry = entry?;
+        if entry.file_name() == ".jj" {
+            continue;
+        }
+        let src = entry.path();
+        let dst = dest.join(entry.file_name());
+        let status = Command::new("cp")
+            .args(["-rc", src.to_str().unwrap(), dst.to_str().unwrap()])
+            .status()
+            .context("Failed to run cp")?;
+        if !status.success() {
+            bail!("cp -rc failed when cloning '{}' to '{}'.", src.display(), dst.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// CoW clone for jj repos: copies the working tree (excluding `.jj/`) then
+/// runs `jj workspace add <dest>` from the source to create a properly backed
+/// workspace. This avoids duplicating the git backend entirely.
+// tarpaulin-ignore-start
+#[cfg(target_os = "macos")]
+fn jj_cow_clone(source: &Path, dest: &Path) -> Result<()> {
+    jj_copy_working_tree(source, dest)?;
+
+    let status = Command::new("jj")
+        .args(["workspace", "add", dest.to_str().unwrap()])
+        .current_dir(source)
+        .status()
+        .context("Failed to run jj workspace add")?;
+    if !status.success() {
+        bail!("jj workspace add failed for '{}'.", dest.display());
+    }
+
+    Ok(())
+}
+// tarpaulin-ignore-end
+
+fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
+        if *vcs == Vcs::Jj {
+            return jj_cow_clone(source, dest);
+        }
         // macOS: cp -rc uses clonefile(2) for copy-on-write on APFS.
         let status = Command::new("cp")
             .args(["-rc", source.to_str().unwrap(), dest.to_str().unwrap()])
@@ -401,5 +462,49 @@ mod tests {
     fn validate_name_rejects_dot() {
         assert!(validate_name(".").is_err());
         assert!(validate_name("..").is_err());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn jj_cow_clone_copies_files_but_not_jj_dir() {
+        use tempfile::TempDir;
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        let dst_path = dst.path().join("dest");
+
+        // Set up a fake jj primary workspace
+        std::fs::create_dir_all(src.path().join(".jj/repo")).unwrap();
+        std::fs::write(src.path().join(".jj/repo/big-object"), "fake git data").unwrap();
+        std::fs::write(src.path().join("src.rs"), "fn main() {}").unwrap();
+        std::fs::create_dir(src.path().join("node_modules")).unwrap();
+        std::fs::write(src.path().join("node_modules/dep.js"), "module.exports=1").unwrap();
+
+        jj_copy_working_tree(src.path(), &dst_path).unwrap();
+
+        assert!(dst_path.join("src.rs").exists(), "src.rs should be copied");
+        assert!(dst_path.join("node_modules/dep.js").exists(), "node_modules should be copied");
+        assert!(!dst_path.join(".jj").exists(), ".jj should NOT be copied");
+    }
+
+    #[test]
+    fn run_rejects_jj_secondary_workspace() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        // .jj/ with no .jj/repo/ → secondary workspace
+        std::fs::create_dir(dir.path().join(".jj")).unwrap();
+        let args = crate::cli::CreateArgs {
+            source: Some(dir.path().to_path_buf()),
+            name: Some("test-ws".into()),
+            branch: None,
+            no_branch: true,
+            dir: None,
+            no_clean: true,
+            change: None,
+        };
+        let err = run(args).unwrap_err();
+        assert!(
+            err.to_string().contains("jj workspace"),
+            "unexpected error: {err}"
+        );
     }
 }
