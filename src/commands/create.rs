@@ -205,7 +205,7 @@ fn validate_name(name: &str) -> Result<()> {
 }
 
 /// Copies every top-level entry from `source` to `dest` except `.jj/`, using
-/// `cp -rc` (clonefile(2) on APFS) for each entry.
+/// `cp -Rc` (clonefile(2) on APFS) for each entry.
 #[cfg(target_os = "macos")]
 fn jj_copy_working_tree(source: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)
@@ -221,11 +221,11 @@ fn jj_copy_working_tree(source: &Path, dest: &Path) -> Result<()> {
         let src = entry.path();
         let dst = dest.join(entry.file_name());
         let status = Command::new("cp")
-            .args(["-rc", src.to_str().unwrap(), dst.to_str().unwrap()])
+            .args(["-Rc", src.to_str().unwrap(), dst.to_str().unwrap()])
             .status()
             .context("Failed to run cp")?;
         if !status.success() {
-            bail!("cp -rc failed when cloning '{}' to '{}'.", src.display(), dst.display());
+            bail!("cp -Rc failed when cloning '{}' to '{}'.", src.display(), dst.display());
         }
     }
 
@@ -259,14 +259,16 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
         if *vcs == Vcs::Jj {
             return jj_cow_clone(source, dest);
         }
-        // macOS: cp -rc uses clonefile(2) for copy-on-write on APFS.
+        // macOS: cp -Rc uses clonefile(2) for CoW on APFS. -R (uppercase) preserves
+        // symlinks rather than following them, which is essential for pnpm's virtual
+        // store and any node_modules/.bin/ symlinks.
         let status = Command::new("cp")
-            .args(["-rc", source.to_str().unwrap(), dest.to_str().unwrap()])
+            .args(["-Rc", source.to_str().unwrap(), dest.to_str().unwrap()])
             .status()
             .context("Failed to run cp")?;
         if !status.success() {
             bail!(
-                "cp -rc failed when cloning '{}' to '{}'.",
+                "cp -Rc failed when cloning '{}' to '{}'.",
                 source.display(),
                 dest.display()
             );
@@ -337,7 +339,7 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
 
 // tarpaulin-ignore-start
 fn setup_jj(workspace: &Path, change: Option<&str>) -> Result<()> {
-    // The cp -rc clone already has its own .jj/ at a different path, so it is
+    // The cp -Rc clone already has its own .jj/ at a different path, so it is
     // independent from the source without any extra steps.
 
     if let Some(change_id) = change {

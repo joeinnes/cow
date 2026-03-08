@@ -2,7 +2,7 @@
 
 Copy-on-write workspace manager for parallel development on macOS.
 
-Uses APFS `clonefile` (via `cp -rc`) to create instant, near-zero-cost copies of a repository. Each workspace looks and behaves like a full repo but only consumes disk for files that are actually modified.
+Uses APFS `clonefile` (via `cp -Rc`) to create instant, near-zero-cost copies of a repository. Each workspace looks and behaves like a full repo but only consumes disk for files that are actually modified.
 
 ## Why
 
@@ -12,7 +12,7 @@ Running multiple coding agents in parallel requires isolated workspaces per feat
 - **full clone** — duplicates the entire `.git` directory, slow and wasteful
 - **containers** — significant overhead for what should be a simple isolation problem
 
-On APFS (the default on every modern Mac), `cp -rc` creates an instant block-level clone. A 5 GB monorepo cloned 10 times still costs ~5 GB until agents start making changes. `node_modules`, `dist`, `.next`, `.env` — all immediately available, no install step needed.
+On APFS (the default on every modern Mac), `cp -Rc` creates an instant block-level clone. A 5 GB monorepo cloned 10 times still costs ~5 GB until agents start making changes. `node_modules`, `dist`, `.next`, `.env` — all immediately available, no install step needed.
 
 ## Install
 
@@ -194,7 +194,7 @@ Add a `.cow.json` to your repo to define project-specific cleanup:
 
 ## Limitations
 
-- macOS requires APFS (`cp -rc` uses `clonefile(2)`). Linux uses `cp --reflink=always` (btrfs or xfs); falls back to a regular copy with a warning on unsupported filesystems.
+- macOS requires APFS (`cp -Rc` uses `clonefile(2)`). Linux uses `cp --reflink=always` (btrfs or xfs); falls back to a regular copy with a warning on unsupported filesystems.
 - Git submodules are not tested and may not work correctly.
 - The source must be a primary git repo, not a git worktree.
 - `cow sync` and `cow extract --branch` are not yet supported for jj workspaces.
