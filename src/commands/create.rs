@@ -158,9 +158,14 @@ pub fn run(args: CreateArgs) -> Result<()> {
     Ok(())
 }
 
-/// Write a `.cow-context` file into the workspace root so agents can orient
-/// themselves without shelling out to `cow status`. Also excludes the file
-/// from git via `.git/info/exclude` so it does not appear as an untracked file.
+/// Write a context file so agents can orient themselves without shelling out to
+/// `cow status`.
+///
+/// For git workspaces the file is `.cow-context` in the repo root, excluded
+/// from git tracking via `.git/info/exclude` so it never appears as untracked.
+///
+/// For jj workspaces the file is `.jj/cow-context`. jj does not scan inside
+/// `.jj/` for working-copy changes, so the file is invisible to `jj diff`.
 fn write_context_file(entry: &WorkspaceEntry) -> Result<()> {
     let ctx = serde_json::json!({
         "name": entry.name,
@@ -170,11 +175,21 @@ fn write_context_file(entry: &WorkspaceEntry) -> Result<()> {
         "initial_commit": entry.initial_commit,
         "created_at": entry.created_at.to_rfc3339(),
     });
+    let ctx_content = serde_json::to_string_pretty(&ctx)?;
+
+    if entry.vcs == Vcs::Jj {
+        // Store inside .jj/ — invisible to jj's working-copy tracking.
+        let ctx_path = entry.path.join(".jj").join("cow-context");
+        std::fs::write(&ctx_path, ctx_content)
+            .with_context(|| format!("Failed to write .jj/cow-context to {}", ctx_path.display()))?;
+        return Ok(());
+    }
+
+    // Git: write to root and exclude from git tracking.
     let ctx_path = entry.path.join(".cow-context");
-    std::fs::write(&ctx_path, serde_json::to_string_pretty(&ctx)?)
+    std::fs::write(&ctx_path, ctx_content)
         .with_context(|| format!("Failed to write .cow-context to {}", ctx_path.display()))?;
 
-    // Exclude from git tracking so it never shows as untracked.
     let exclude_path = entry.path.join(".git").join("info").join("exclude");
     if let Ok(existing) = std::fs::read_to_string(&exclude_path) {
         if !existing.contains(".cow-context") {
@@ -204,9 +219,34 @@ fn validate_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Copies every top-level entry from `source` to `dest` except `.jj/`, using
-/// `cp -Rc` (clonefile(2) on APFS) for each entry.
+/// Clone `src` to `dst` using `clonefile(2)`. `dst` must not already exist.
+/// Atomically clones the entire directory tree in O(1) kernel time on APFS.
 #[cfg(target_os = "macos")]
+fn clonefile_dir(src: &Path, dst: &Path) -> Result<()> {
+    use std::ffi::CString;
+    let src_c = CString::new(
+        src.to_str().with_context(|| format!("Source path is not valid UTF-8: {}", src.display()))?,
+    )
+    .context("Source path contains a null byte")?;
+    let dst_c = CString::new(
+        dst.to_str().with_context(|| format!("Dest path is not valid UTF-8: {}", dst.display()))?,
+    )
+    .context("Dest path contains a null byte")?;
+    let ret = unsafe { libc::clonefile(src_c.as_ptr(), dst_c.as_ptr(), 0) };
+    if ret != 0 {
+        bail!(
+            "clonefile failed '{}' to '{}': {}",
+            src.display(),
+            dst.display(),
+            std::io::Error::last_os_error()
+        );
+    }
+    Ok(())
+}
+
+/// Copies every top-level entry from `source` to `dest` except `.jj/`,
+/// using `clonefile(2)` for each entry.
+#[cfg(all(target_os = "macos", test))]
 fn jj_copy_working_tree(source: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)
         .with_context(|| format!("Failed to create destination directory: {}", dest.display()))?;
@@ -220,33 +260,50 @@ fn jj_copy_working_tree(source: &Path, dest: &Path) -> Result<()> {
         }
         let src = entry.path();
         let dst = dest.join(entry.file_name());
-        let status = Command::new("cp")
-            .args(["-Rc", src.to_str().unwrap(), dst.to_str().unwrap()])
-            .status()
-            .context("Failed to run cp")?;
-        if !status.success() {
-            bail!("cp -Rc failed when cloning '{}' to '{}'.", src.display(), dst.display());
-        }
+        clonefile_dir(&src, &dst)
+            .with_context(|| format!("Failed to clone '{}' to '{}'", src.display(), dst.display()))?;
     }
 
     Ok(())
 }
 
-/// CoW clone for jj repos: copies the working tree (excluding `.jj/`) then
-/// runs `jj workspace add <dest>` from the source to create a properly backed
-/// workspace. This avoids duplicating the git backend entirely.
+/// CoW clone for jj repos: runs `jj workspace add <dest>` first (dest must not
+/// yet exist), then copies any source entries that jj did not materialise
+/// (untracked files: node_modules, build artefacts, .env, etc.) using
+/// clonefile(2). Order matters — jj rejects a non-empty destination.
 // tarpaulin-ignore-start
 #[cfg(target_os = "macos")]
 fn jj_cow_clone(source: &Path, dest: &Path) -> Result<()> {
-    jj_copy_working_tree(source, dest)?;
-
+    // Step 1: let jj create and initialise the workspace.
+    // Disable commit signing for this invocation — the empty workspace-root
+    // commit does not need to be signed, and prompting for an SSH passphrase
+    // mid-clone is surprising UX.
     let status = Command::new("jj")
-        .args(["workspace", "add", dest.to_str().unwrap()])
+        .args([
+            "--config", "signing.behavior=\"drop\"",
+            "workspace", "add", dest.to_str().unwrap(),
+        ])
         .current_dir(source)
         .status()
         .context("Failed to run jj workspace add")?;
     if !status.success() {
         bail!("jj workspace add failed for '{}'.", dest.display());
+    }
+
+    // Step 2: copy untracked source entries that jj did not materialise.
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("Failed to read source directory: {}", source.display()))?
+    {
+        let entry = entry?;
+        if entry.file_name() == ".jj" {
+            continue;
+        }
+        let dst = dest.join(entry.file_name());
+        if dst.exists() {
+            continue; // jj already materialised this entry
+        }
+        clonefile_dir(&entry.path(), &dst)
+            .with_context(|| format!("Failed to clone '{}'", entry.path().display()))?;
     }
 
     Ok(())
@@ -259,21 +316,9 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
         if *vcs == Vcs::Jj {
             return jj_cow_clone(source, dest);
         }
-        // macOS: cp -Rc uses clonefile(2) for CoW on APFS. -R (uppercase) preserves
-        // symlinks rather than following them, which is essential for pnpm's virtual
-        // store and any node_modules/.bin/ symlinks.
-        let status = Command::new("cp")
-            .args(["-Rc", source.to_str().unwrap(), dest.to_str().unwrap()])
-            .status()
-            .context("Failed to run cp")?;
-        if !status.success() {
-            bail!(
-                "cp -Rc failed when cloning '{}' to '{}'.",
-                source.display(),
-                dest.display()
-            );
-        }
-        return Ok(());
+        // macOS: clonefile(2) atomically clones the entire directory tree.
+        // This is a single kernel call — O(1) on APFS, no per-file traversal.
+        return clonefile_dir(source, dest);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -437,6 +482,38 @@ fn remove_glob_or_dir(base: &Path, pattern: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn clonefile_dir_clones_directory_tree() {
+        use tempfile::TempDir;
+        let src = TempDir::new().unwrap();
+        let dst_parent = TempDir::new().unwrap();
+        let dst = dst_parent.path().join("clone");
+
+        std::fs::write(src.path().join("hello.txt"), "hello").unwrap();
+        std::fs::create_dir(src.path().join("sub")).unwrap();
+        std::fs::write(src.path().join("sub/nested.txt"), "world").unwrap();
+
+        clonefile_dir(src.path(), &dst).unwrap();
+
+        assert!(dst.join("hello.txt").exists(), "hello.txt should be cloned");
+        assert!(dst.join("sub/nested.txt").exists(), "nested.txt should be cloned");
+        assert_eq!(std::fs::read_to_string(dst.join("hello.txt")).unwrap(), "hello");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn clonefile_dir_fails_if_dest_exists() {
+        use tempfile::TempDir;
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap(); // already exists
+
+        std::fs::write(src.path().join("file.txt"), "data").unwrap();
+
+        let err = clonefile_dir(src.path(), dst.path()).unwrap_err();
+        assert!(err.to_string().contains("clonefile failed"), "unexpected: {err}");
+    }
 
     #[test]
     fn validate_name_accepts_valid() {
