@@ -1,4 +1,4 @@
-// build.rs — generates swt.1 at compile time using clap_mangen.
+// build.rs — generates cow.1 at compile time using clap_mangen.
 //
 // The CLI definition is pulled in via include! so it is available to both
 // this build script and the main binary without duplication.
@@ -18,12 +18,12 @@ fn main() {
 
     // Write to OUT_DIR — the canonical location Cargo exposes for build outputs.
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    std::fs::write(out_dir.join("swt.1"), &buf).expect("failed to write swt.1 to OUT_DIR");
+    std::fs::write(out_dir.join("cow.1"), &buf).expect("failed to write cow.1 to OUT_DIR");
 
-    // Also mirror to target/man/swt.1 so the Makefile can find it at a
+    // Also mirror to target/man/cow.1 so the Makefile can find it at a
     // stable path without needing to parse cargo metadata.
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let man_dir = manifest_dir.join("target").join("man");
     std::fs::create_dir_all(&man_dir).ok();
-    std::fs::write(man_dir.join("swt.1"), &buf).ok(); // best-effort
+    std::fs::write(man_dir.join("cow.1"), &buf).ok(); // best-effort
 }
