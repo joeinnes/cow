@@ -13,7 +13,7 @@ pub fn run(args: StatusArgs) -> Result<()> {
         .cloned()
         .with_context(|| format!("Workspace '{}' not found.", name))?;
 
-    let (is_dirty, modified_files) = match entry.vcs {
+    let (is_dirty, modified_files_str) = match entry.vcs {
         Vcs::Git => {
             let dirty = vcs::git_is_dirty(&entry.path);
             let files = if dirty { vcs::git_status_short(&entry.path) } else { String::new() };
@@ -28,8 +28,6 @@ pub fn run(args: StatusArgs) -> Result<()> {
         // tarpaulin-ignore-end
     };
 
-    let status_str = if is_dirty { "dirty" } else { "clean" };
-
     // Current branch (may differ from stored branch)
     let branch = match entry.vcs {
         Vcs::Git => vcs::git_current_branch(&entry.path)
@@ -39,6 +37,28 @@ pub fn run(args: StatusArgs) -> Result<()> {
         // tarpaulin-ignore-end
     };
 
+    if args.json {
+        let modified_files: Vec<&str> = modified_files_str
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        let out = serde_json::json!({
+            "name": entry.name,
+            "path": entry.path.to_string_lossy(),
+            "source": entry.source.to_string_lossy(),
+            "branch": branch,
+            "vcs": entry.vcs.to_string(),
+            "dirty": is_dirty,
+            "modified_files": modified_files,
+            "initial_commit": entry.initial_commit,
+            "created_at": entry.created_at.to_rfc3339(),
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    let status_str = if is_dirty { "dirty" } else { "clean" };
     let disk_delta = estimate_disk_delta(&entry);
 
     println!("Workspace:  {}", entry.name);
@@ -55,9 +75,9 @@ pub fn run(args: StatusArgs) -> Result<()> {
         println!("Disk delta: {} (estimated from modified file sizes)", format_bytes(bytes));
     }
 
-    if !modified_files.trim().is_empty() {
+    if !modified_files_str.trim().is_empty() {
         println!("\nModified files:");
-        for line in modified_files.lines() {
+        for line in modified_files_str.lines() {
             println!("  {}", line);
         }
     }
