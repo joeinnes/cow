@@ -3,11 +3,12 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::{
-    apfs,
     cli::CreateArgs,
     state::{self, State, WorkspaceEntry},
     vcs::{self, Vcs},
 };
+#[cfg(target_os = "macos")]
+use crate::apfs;
 
 pub fn run(args: CreateArgs) -> Result<()> {
     // Resolve source path
@@ -31,11 +32,12 @@ pub fn run(args: CreateArgs) -> Result<()> {
         );
     }
 
-    // APFS check
+    // APFS check (macOS only — on Linux we attempt reflink and fall back gracefully)
     // tarpaulin-ignore-start
+    #[cfg(target_os = "macos")]
     if !apfs::is_apfs(&source) {
         bail!(
-            "Source filesystem is not APFS. cow requires APFS for copy-on-write clones.\n\
+            "Source filesystem is not APFS. cow requires APFS for copy-on-write clones on macOS.\n\
              Run `diskutil info {}` to see the filesystem type.",
             source.display()
         );
@@ -194,18 +196,56 @@ fn validate_name(name: &str) -> Result<()> {
 }
 
 fn cow_clone(source: &Path, dest: &Path) -> Result<()> {
-    let status = Command::new("cp")
-        .args(["-rc", source.to_str().unwrap(), dest.to_str().unwrap()])
-        .status()
-        .context("Failed to run cp")?;
-    if !status.success() {
-        bail!(
-            "cp -rc failed when cloning '{}' to '{}'.",
-            source.display(),
-            dest.display()
-        );
+    #[cfg(target_os = "macos")]
+    {
+        // macOS: cp -rc uses clonefile(2) for copy-on-write on APFS.
+        let status = Command::new("cp")
+            .args(["-rc", source.to_str().unwrap(), dest.to_str().unwrap()])
+            .status()
+            .context("Failed to run cp")?;
+        if !status.success() {
+            bail!(
+                "cp -rc failed when cloning '{}' to '{}'.",
+                source.display(),
+                dest.display()
+            );
+        }
+        return Ok(());
     }
-    Ok(())
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Linux: attempt copy-on-write via cp --reflink=always (btrfs, xfs).
+        // Fall back to a regular copy with a warning if the filesystem does not support it.
+        let reflink_status = Command::new("cp")
+            .args(["--reflink=always", "-r", source.to_str().unwrap(), dest.to_str().unwrap()])
+            .status();
+
+        match reflink_status {
+            Ok(s) if s.success() => return Ok(()),
+            _ => {
+                eprintln!(
+                    "Warning: filesystem does not support reflinks (btrfs/xfs required). \
+                     Falling back to a regular copy — disk overhead will be higher."
+                );
+                // Clean up any partial output from the failed reflink attempt.
+                let _ = std::fs::remove_dir_all(dest);
+
+                let status = Command::new("cp")
+                    .args(["-r", source.to_str().unwrap(), dest.to_str().unwrap()])
+                    .status()
+                    .context("Failed to run cp")?;
+                if !status.success() {
+                    bail!(
+                        "cp -r failed when cloning '{}' to '{}'.",
+                        source.display(),
+                        dest.display()
+                    );
+                }
+                return Ok(());
+            }
+        }
+    }
 }
 
 fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {

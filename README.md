@@ -189,11 +189,11 @@ Add a `.cow.json` to your repo to define project-specific cleanup:
 | Disk overhead | ~0 (CoW) | Full working tree | Full repo |
 | `node_modules` ready | Yes | No | No |
 | `.env` / build cache | Yes | No | No |
-| macOS only | Yes | No | No |
+| macOS/Linux | Yes | No | No |
 
 ## Limitations
 
-- macOS and APFS only (v1). Linux support via OverlayFS is a future consideration.
+- macOS requires APFS (`cp -rc` uses `clonefile(2)`). Linux uses `cp --reflink=always` (btrfs or xfs); falls back to a regular copy with a warning on unsupported filesystems.
 - Git submodules are not tested and may not work correctly.
 - The source must be a primary git repo, not a git worktree.
 - `cow sync` and `cow extract --branch` are not yet supported for jj workspaces.
