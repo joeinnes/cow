@@ -2709,4 +2709,82 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false);
         assert!(patch_path.exists(), "patch file should be written");
     }
+
+    #[test]
+    fn mcp_cow_sync_merge_flag() {
+        // Exercises the --merge path in the MCP cow_sync dispatch.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "mcp-merge-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        std::fs::write(source.path().join("mcp_merge.txt"), "merge").unwrap();
+        git(source.path(), &["add", "mcp_merge.txt"]);
+        git(source.path(), &["commit", "-m", "advance"]);
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "cow_sync",
+                "arguments": {
+                    "name": "mcp-merge-ws",
+                    "source_branch": "main",
+                    "merge": true
+                }
+            }
+        });
+
+        let raw = env.cow()
+            .arg("mcp")
+            .write_stdin(format!("{}\n", req).as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(env.home.join(".cow/workspaces/mcp-merge-ws/mcp_merge.txt").exists());
+    }
+
+    #[test]
+    fn mcp_cow_extract_no_flags_is_error() {
+        // Calling cow_extract with neither branch nor patch should return isError: true.
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["create", "mcp-noflag-ws", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        let req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "cow_extract",
+                "arguments": { "name": "mcp-noflag-ws" }
+            }
+        });
+
+        let raw = env.cow()
+            .arg("mcp")
+            .write_stdin(format!("{}\n", req).as_str())
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let resp: serde_json::Value = serde_json::from_str(String::from_utf8_lossy(&raw).trim()).unwrap();
+        assert_eq!(resp["result"]["isError"], true);
+        assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("--patch"));
+    }
 }

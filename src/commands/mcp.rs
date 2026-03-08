@@ -291,5 +291,8 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
         }
         result.push_str(&String::from_utf8_lossy(&output.stderr));
     }
+    if !output.status.success() {
+        anyhow::bail!("{}", result.trim());
+    }
     Ok(result)
 }
