@@ -5,8 +5,9 @@ edition = "2021"
 description = "Copy-on-write workspace manager for parallel development"
 authors = ["Joe"]
 license = "MIT"
-homepage = "https://github.com/joeinn.es/cow"
-repository = "https://github.com/joeinn.es/cow"
+homepage = "https://github.com/joeinnes/cow"
+repository = "https://github.com/joeinnes/cow"
+readme = "README.md"
 keywords = ["git", "workspace", "apfs", "copy-on-write", "development"]
 
 [[bin]]
