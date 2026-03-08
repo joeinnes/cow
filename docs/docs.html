@@ -386,12 +386,20 @@
         <li><a href="#cmd-fetch-from">fetch-from</a></li>
         <li><a href="#cmd-recreate">recreate</a></li>
         <li><a href="#cmd-cd">cd</a></li>
+        <li><a href="#cmd-path">path</a></li>
         <li><a href="#cmd-install">install</a></li>
+        <li><a href="#cmd-gc">gc</a></li>
+        <li><a href="#cmd-stats">stats</a></li>
         <li><a href="#cmd-mcp">mcp</a></li>
       </ul>
       <hr class="sidebar-divider">
       <ul class="sidebar-nav">
         <li><a href="#cmd-cowjson">.cow.json</a></li>
+      </ul>
+      <hr class="sidebar-divider">
+      <span class="sidebar-label">Companion</span>
+      <ul class="sidebar-nav">
+        <li><a href="#herd">Herd</a></li>
       </ul>
     </aside>
 
@@ -400,7 +408,7 @@
 
       <header class="page-header">
         <span class="section-label">command reference</span>
-        <h1>All fifteen commands.</h1>
+        <h1>All eighteen commands.</h1>
         <p class="header-desc">Complete reference for every <code>cow</code> command and option.</p>
       </header>
 
@@ -571,6 +579,12 @@
         </div>
       </div>
 
+      <!-- path -->
+      <div class="cmd-block" id="cmd-path">
+        <h3 class="cmd-sig"><code>cow path &lt;NAME&gt;</code></h3>
+        <p class="cmd-desc">Print the absolute path of a named pasture. Identical to <code>cow cd</code> — provided as an alias for scripting contexts where the intent is clearer as "print path" rather than "cd".</p>
+      </div>
+
       <!-- install -->
       <div class="cmd-block" id="cmd-install">
         <h3 class="cmd-sig"><code>cow install</code></h3>
@@ -586,6 +600,28 @@
         </div>
       </div>
 
+      <!-- gc -->
+      <div class="cmd-block" id="cmd-gc">
+        <h3 class="cmd-sig"><code>cow gc [OPTIONS]</code></h3>
+        <p class="cmd-desc">Remove pastures whose branches have been pushed or merged to origin. Checks cached remote-tracking refs by default — no network call needed. Use <code>--merged</code> for a stricter check (only removes branches that are fully merged into the default branch).</p>
+        <table class="opts-table">
+          <thead><tr><th>Option</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>--merged</code></td><td>Only remove pastures whose branch is merged into the default branch on origin</td></tr>
+            <tr><td><code>--fetch</code></td><td>Fetch from origin first (updates remote-tracking refs before checking)</td></tr>
+            <tr><td><code>--dry-run</code></td><td>Show what would be removed without removing anything</td></tr>
+            <tr><td><code>-y, --yes</code></td><td>Skip confirmation prompts</td></tr>
+            <tr><td><code>--force</code></td><td>Skip dirty-state warnings and remove immediately</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- stats -->
+      <div class="cmd-block" id="cmd-stats">
+        <h3 class="cmd-sig"><code>cow stats</code></h3>
+        <p class="cmd-desc">Show estimated disk savings across all pastures. Groups pastures by source repository and compares the total disk usage of each source against the incremental delta of its pastures — the difference is what cow saves versus a traditional clone. Estimates are shown for both npm-style and pnpm-style node_modules layouts.</p>
+      </div>
+
       <!-- .cow.json -->
       <div class="cmd-block" id="cmd-cowjson">
         <h3 class="cmd-sig"><code>.cow.json</code> — project config</h3>
@@ -598,6 +634,31 @@
     <span class="s">"run"</span>: [<span class="s">"npm run codegen"</span>]
   <span class="k">}</span>
 <span class="k">}</span></div>
+      </div>
+
+      <!-- herd -->
+      <div class="cmd-block" id="herd">
+        <h3 class="cmd-sig"><code>Herd</code> — menubar companion</h3>
+        <p class="cmd-desc">Herd is a native macOS menubar app that gives you a live view of all your pastures without opening a terminal. Pastures are grouped by project, with hover actions to open in Finder, open in Terminal, sync from source, or remove. A stats strip at the bottom shows real-time disk savings.</p>
+
+        <table class="opts-table">
+          <thead><tr><th>Action</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td>Open in Finder</td><td>Reveals the pasture directory in Finder</td></tr>
+            <tr><td>Open in Terminal</td><td>Opens a Terminal window at the pasture path</td></tr>
+            <tr><td>Sync</td><td>Runs <code>cow sync</code> for that pasture in the background</td></tr>
+            <tr><td>Remove</td><td>Confirms then runs <code>cow remove</code>, deleting the pasture</td></tr>
+          </tbody>
+        </table>
+
+        <div class="cmd-note">
+          <strong>Install</strong><br>
+          <code>brew install joeinnes/tap/herd</code><br><br>
+          Then copy the app to your Applications folder:<br>
+          <code>cp -r $(brew --prefix)/opt/herd/Herd.app /Applications/</code><br><br>
+          Herd is unsigned. On first launch, right-click <code>Herd.app</code> and choose <strong>Open</strong>, then click Open in the Gatekeeper prompt. Subsequent launches work normally.<br><br>
+          Herd requires the <code>cow</code> CLI to be installed and on your <code>PATH</code>.
+        </div>
       </div>
 
     </main>
