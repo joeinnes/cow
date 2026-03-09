@@ -342,6 +342,56 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.2 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.2</span>
+          <span class="release-date">2026-03-03</span>
+          <span class="release-tag feature">new command</span>
+        </div>
+        <div class="release-body">
+          <h2>Migrate existing worktrees into cow.</h2>
+          <p class="lead">
+            Adds <code>cow migrate</code>, which discovers git linked worktrees, jj secondary
+            workspaces, and orphaned cow workspace directories and migrates them into proper
+            cow-managed APFS clone workspaces — so you can adopt cow without starting your
+            in-progress branches from scratch.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Commands</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                <code>cow migrate [--source] [--all] [--force] [--dry-run]</code> — discover
+                and migrate git worktrees, jj workspaces, and orphaned directories into
+                cow-managed workspaces. Git worktrees are replaced with an APFS clone and the
+                old worktree removed; jj workspaces are re-created with <code>jj workspace add</code>
+                and the old one forgotten; orphaned directories are registered in-place without
+                cloning. Dirty candidates are skipped unless <code>--force</code> is passed.
+                <code>--dry-run</code> prints the plan without making any changes.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Documentation</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag docs">docs</span>
+                README: added <code>cow migrate</code> command reference and a Development section
+                documenting the three root causes of the test coverage gap in
+                <code>migrate.rs</code> (jj paths, subprocess integration tests, defensive error paths).
+              </li>
+              <li>
+                <span class="tag docs">docs</span>
+                Homepage: updated CLI demo to include a <code>migrate</code> tab.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.1 -->
       <div class="release">
         <div class="release-meta">
