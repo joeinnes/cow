@@ -342,6 +342,44 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.9 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.9</span>
+          <span class="release-date">2026-03-10</span>
+          <span class="release-tag fix">bug fix</span>
+        </div>
+        <div class="release-body">
+          <h2>Turbopack monorepo support and Herd app icon.</h2>
+          <p class="lead">
+            Fixes cow create on Turbopack monorepos, where symlinks caused build failures.
+            Adds a proper app icon to Herd.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Bug fixes</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag fix">fix</span>
+                <strong>Turbopack monorepos</strong> — <code>cow create</code> now detects <code>turbo.json</code>
+                and performs a full clone instead of symlinking <code>node_modules</code>, which Turbopack
+                cannot follow. A note is printed explaining the slightly slower clone.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Herd</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag feature">new</span>
+                App icon — cow emoji on cream background, shown correctly in Finder and the Dock.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.8 -->
       <div class="release">
         <div class="release-meta">
