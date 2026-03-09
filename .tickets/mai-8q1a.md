@@ -1,6 +1,6 @@
 ---
 id: mai-8q1a
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-02T10:12:39Z
