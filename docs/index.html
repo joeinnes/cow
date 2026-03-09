@@ -744,7 +744,7 @@
   <section id="demo">
     <div class="container">
       <span class="section-label">cli reference</span>
-      <h2>Five commands. That is the whole thing.</h2>
+      <h2>Six commands. That is the whole thing.</h2>
       <p class="section-intro">
         Deliberately minimal. No config files to maintain, no daemons to manage, no subscriptions.
       </p>
@@ -760,6 +760,7 @@
             <button class="terminal-tab" onclick="showTab('remove',this)">remove</button>
             <button class="terminal-tab" onclick="showTab('extract',this)">extract</button>
             <button class="terminal-tab" onclick="showTab('status',this)">status</button>
+            <button class="terminal-tab" onclick="showTab('migrate',this)">migrate</button>
           </div>
         </div>
 
@@ -831,6 +832,29 @@
             <span class="t-line t-out">Modified files:</span>
             <span class="t-line t-out">  M src/api/routes.rs</span>
             <span class="t-line t-out">  A src/api/middleware.rs</span>
+          </div>
+
+          <div class="tab-panel" id="tab-migrate">
+            <span class="t-line t-out"># discover git worktrees, jj workspaces, and orphaned cow dirs</span>
+            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project</span></span>
+            <span class="t-line t-out">Found 2 candidate(s) to migrate:</span>
+            <span class="t-line t-out">  feat-auth — /Users/joe/my-project-feat-auth</span>
+            <span class="t-line t-out">  feat-api  — /Users/joe/my-project-feat-api</span>
+            <span class="t-line t-out">Run with --all to migrate all of them.</span>
+            <span class="t-line">&nbsp;</span>
+            <span class="t-line t-out"># preview what would happen without making any changes</span>
+            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project --all --dry-run</span></span>
+            <span class="t-line t-out">[dry-run] Would migrate 'feat-auth' (/Users/joe/my-project-feat-auth)</span>
+            <span class="t-line t-out">[dry-run] Would migrate 'feat-api' (/Users/joe/my-project-feat-api)</span>
+            <span class="t-line">&nbsp;</span>
+            <span class="t-line t-out"># migrate all candidates (skips dirty workspaces)</span>
+            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project --all</span></span>
+            <span class="t-line t-out">Skipping 'feat-api' — has uncommitted changes (use --force to override).</span>
+            <span class="t-line t-ok">Migrated 'feat-auth'</span>
+            <span class="t-line">&nbsp;</span>
+            <span class="t-line t-out"># migrate everything, including dirty workspaces</span>
+            <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project --all --force</span></span>
+            <span class="t-line t-ok">Migrated 'feat-api'</span>
           </div>
 
         </div>
