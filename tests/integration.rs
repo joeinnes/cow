@@ -2899,4 +2899,220 @@ mod tests {
         assert_eq!(resp["result"]["isError"], true);
         assert!(resp["result"]["content"][0]["text"].as_str().unwrap().contains("--patch"));
     }
+
+    // ─── migrate ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn migrate_no_candidates_prints_message() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap(), "--all"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No candidates found"));
+    }
+
+    #[test]
+    fn migrate_without_all_lists_candidates() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        // Add a linked worktree to the source.
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("my-feature");
+        git(source.path(), &["worktree", "add", "-b", "feature", wt_path.to_str().unwrap()]);
+
+        env.cow()
+            .args(["migrate", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("my-feature"))
+            .stdout(predicate::str::contains("--all"));
+    }
+
+    #[test]
+    fn migrate_dry_run_makes_no_changes() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("dry-feature");
+        git(source.path(), &["worktree", "add", "-b", "dry-branch", wt_path.to_str().unwrap()]);
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+                "--dry-run",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("[dry-run]"));
+
+        // Worktree still exists.
+        assert!(wt_path.exists(), "worktree should still exist after dry-run");
+
+        // Nothing registered in state.
+        let state_file = env.home.join(".cow/state.json");
+        assert!(!state_file.exists(), "state file should not be created by dry-run");
+    }
+
+    #[test]
+    fn migrate_skips_dirty_git_worktree_without_force() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("dirty-feature");
+        git(source.path(), &["worktree", "add", "-b", "dirty-branch", wt_path.to_str().unwrap()]);
+
+        // Make the worktree dirty.
+        std::fs::write(wt_path.join("untracked.txt"), "dirty").unwrap();
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Skipping 'dirty-feature'"));
+
+        // Worktree still exists; nothing was migrated.
+        assert!(wt_path.exists());
+        let state_file = env.home.join(".cow/state.json");
+        assert!(!state_file.exists(), "nothing should be registered");
+    }
+
+    #[test]
+    fn migrate_git_worktree_creates_cow_workspace() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("wt-feature");
+        git(source.path(), &["worktree", "add", "-b", "wt-branch", wt_path.to_str().unwrap()]);
+        // Add a commit in the worktree so we have something to check.
+        std::fs::write(wt_path.join("wt_file.txt"), "from worktree").unwrap();
+        git(&wt_path, &["add", "."]);
+        git(&wt_path, &["commit", "-m", "worktree commit"]);
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated 'wt-feature'"));
+
+        // A new cow workspace should exist.
+        let ws = env.home.join(".cow/workspaces/wt-feature");
+        assert!(ws.exists(), "cow workspace directory should exist");
+        assert!(ws.join(".git").is_dir(), "workspace should be a git repo");
+        assert!(ws.join("hello.txt").exists(), "source files should be present");
+
+        // The old worktree should have been removed.
+        assert!(!wt_path.exists(), "old worktree should be removed");
+
+        // State should have one entry.
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("wt-feature"));
+    }
+
+    #[test]
+    fn migrate_dirty_git_worktree_with_force() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("forced-feature");
+        git(source.path(), &["worktree", "add", "-b", "forced-branch", wt_path.to_str().unwrap()]);
+        std::fs::write(wt_path.join("dirty.txt"), "dirty").unwrap();
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source.path().to_str().unwrap(),
+                "--all",
+                "--force",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated 'forced-feature'"));
+
+        let ws = env.home.join(".cow/workspaces/forced-feature");
+        assert!(ws.exists(), "workspace should be created even when dirty with --force");
+    }
+
+    #[test]
+    fn migrate_orphaned_workspace_registers_in_state() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let source_path = source.path().canonicalize().unwrap();
+
+        // Create an orphaned workspace: in ~/.cow/workspaces but not in state.
+        let ws_dir = env.home.join(".cow/workspaces");
+        std::fs::create_dir_all(&ws_dir).unwrap();
+        let orphan = ws_dir.join("orphaned-ws");
+
+        // Clone the source into the orphan path.
+        std::process::Command::new("git")
+            .args(["clone", source_path.to_str().unwrap(), orphan.to_str().unwrap()])
+            .status()
+            .unwrap();
+
+        // Write a .cow-context so migrate can identify the source.
+        let ctx = serde_json::json!({
+            "name": "orphaned-ws",
+            "source": source_path.to_string_lossy(),
+            "branch": "main",
+            "vcs": "git",
+        });
+        std::fs::write(orphan.join(".cow-context"), serde_json::to_string_pretty(&ctx).unwrap()).unwrap();
+
+        env.cow()
+            .args([
+                "migrate",
+                "--source", source_path.to_str().unwrap(),
+                "--all",
+            ])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("Migrated 'orphaned-ws'"));
+
+        // Directory should still exist (orphaned workspaces are registered in-place).
+        assert!(orphan.exists(), "orphaned workspace dir should still exist");
+
+        // Should be listed in cow list.
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("orphaned-ws"));
+    }
+
+    #[test]
+    fn migrate_rejects_git_worktree_as_source() {
+        let env = Env::new();
+        let source = make_git_repo();
+
+        let wt_parent = TempDir::new().unwrap();
+        let wt_path = wt_parent.path().join("a-worktree");
+        git(source.path(), &["worktree", "add", "-b", "wt-br", wt_path.to_str().unwrap()]);
+
+        env.cow()
+            .args(["migrate", "--source", wt_path.to_str().unwrap()])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("git worktree"));
+    }
 }
