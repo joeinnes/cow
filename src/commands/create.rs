@@ -110,52 +110,114 @@ pub fn run(args: CreateArgs) -> Result<()> {
     println!("Cloning {} ...", source.display());
     cow_clone(&source, &dest, &detected_vcs)?;
 
-    // Capture HEAD SHA before any branch switching so extract has a reliable base.
-    let initial_commit = if detected_vcs == Vcs::Git {
-        vcs::git_head_sha(&dest)
+    // All post-clone steps. If any fail the clone is rolled back so the user
+    // is never left with an orphaned directory or dangling jj workspace record.
+    let setup_result = post_clone_setup(
+        &source,
+        &dest,
+        &detected_vcs,
+        branch_arg.as_deref(),
+        args.change.as_deref(),
+        args.from.as_deref(),
+        args.no_clean,
+        &name,
+        &mut state,
+    );
+
+    if let Err(ref e) = setup_result {
+        eprintln!("cow: workspace setup failed — rolling back: {:#}", e);
+        rollback_clone(&source, &dest, &detected_vcs);
+        return setup_result;
+    }
+
+    let has_cow_json = source.join(".cow.json").exists();
+    println!("Created workspace '{}' at {}", name, dest.display());
+    println!("To remove: cow remove {}", name);
+    if !has_cow_json {
+        println!(
+            "Tip: add a .cow.json to remove stale build dirs or run post-clone setup. \
+             See the README for details."
+        );
+    }
+    Ok(())
+}
+
+/// Execute all setup steps that follow the initial CoW clone.
+/// Extracted so that `run()` can roll back atomically on any failure.
+fn post_clone_setup(
+    source: &Path,
+    dest: &Path,
+    detected_vcs: &Vcs,
+    branch_arg: Option<&str>,
+    change_arg: Option<&str>,
+    from_arg: Option<&str>,
+    no_clean: bool,
+    name: &str,
+    state: &mut State,
+) -> Result<()> {
+    let initial_commit = if *detected_vcs == Vcs::Git {
+        vcs::git_head_sha(dest)
     } else {
         // tarpaulin-ignore-start
         None
         // tarpaulin-ignore-end
     };
 
-    // VCS post-clone setup
     let branch = match detected_vcs {
-        Vcs::Git => setup_git(&dest, branch_arg.as_deref())?,
+        Vcs::Git => setup_git(dest, branch_arg)?,
         // tarpaulin-ignore-start
         Vcs::Jj => {
-            setup_jj(&dest, args.change.as_deref())?;
+            setup_jj(dest, change_arg, from_arg)?;
             None
         }
         // tarpaulin-ignore-end
     };
 
-    // Cleanup step
-    if !args.no_clean {
-        cleanup_runtime_artefacts(&dest)?;
+    if !no_clean {
+        cleanup_runtime_artefacts(dest)?;
         let config_path = source.join(".cow.json");
         if config_path.exists() {
-            cleanup_from_config(&dest, &config_path)?;
+            cleanup_from_config(dest, &config_path)?;
         }
     }
 
-    // Persist state
     let entry = WorkspaceEntry {
-        name: name.clone(),
-        path: dest.clone(),
-        source,
-        vcs: detected_vcs,
+        name: name.to_string(),
+        path: dest.to_path_buf(),
+        source: source.to_path_buf(),
+        vcs: detected_vcs.clone(),
         branch,
         initial_commit,
         created_at: chrono::Utc::now(),
     };
     state.add(entry.clone());
     state.save()?;
-
     write_context_file(&entry)?;
-
-    println!("Created workspace '{}' at {}", name, dest.display());
     Ok(())
+}
+
+/// Undo a partial clone: forget the jj workspace record (if jj) then remove
+/// the cloned directory.
+fn rollback_clone(source: &Path, dest: &Path, vcs: &Vcs) {
+    // tarpaulin-ignore-start
+    if *vcs == Vcs::Jj {
+        if let Some(ws_name) = dest.file_name().and_then(|n| n.to_str()) {
+            let _ = Command::new("jj")
+                .args(["workspace", "forget", ws_name])
+                .current_dir(source)
+                .status();
+        }
+    }
+    // tarpaulin-ignore-end
+    if dest.exists() {
+        if let Err(e) = std::fs::remove_dir_all(dest) {
+            eprintln!(
+                "cow: warning — could not remove partial workspace at '{}': {}",
+                dest.display(),
+                e
+            );
+        }
+    }
 }
 
 /// Write a context file so agents can orient themselves without shelling out to
@@ -383,18 +445,36 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
 }
 
 // tarpaulin-ignore-start
-fn setup_jj(workspace: &Path, change: Option<&str>) -> Result<()> {
+fn setup_jj(workspace: &Path, change: Option<&str>, from: Option<&str>) -> Result<()> {
     // The cp -Rc clone already has its own .jj/ at a different path, so it is
     // independent from the source without any extra steps.
 
-    if let Some(change_id) = change {
+    if let Some(rev) = from {
+        // --from: create a new change on top of the given revision.
+        let status = Command::new("jj")
+            .args(["new", rev])
+            .current_dir(workspace)
+            .status()
+            .context("Failed to run jj new")?;
+        if !status.success() {
+            bail!(
+                "Failed to create a new change from '{}' in workspace.\n\
+                 If '{}' is immutable, try passing a mutable descendant instead.",
+                rev, rev
+            );
+        }
+    } else if let Some(change_id) = change {
         let status = Command::new("jj")
             .args(["edit", change_id])
             .current_dir(workspace)
             .status()
             .context("Failed to run jj edit")?;
         if !status.success() {
-            bail!("Failed to check out change '{}' in workspace.", change_id);
+            bail!(
+                "Failed to edit change '{}' in workspace.\n\
+                 If '{}' is immutable, use --from {} to create a new change on top.",
+                change_id, change_id, change_id
+            );
         }
     }
 
@@ -579,6 +659,7 @@ mod tests {
             dir: None,
             no_clean: true,
             change: None,
+            from: None,
         };
         let err = run(args).unwrap_err();
         assert!(

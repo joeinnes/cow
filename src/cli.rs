@@ -54,9 +54,13 @@ pub struct CreateArgs {
     #[arg(long)]
     pub no_branch: bool,
 
-    /// jj change to edit in the new workspace
+    /// jj change to edit directly in the new workspace (jj edit <change>). Use --from to branch from a change instead.
     #[arg(long)]
     pub change: Option<String>,
+
+    /// jj change to use as parent — creates a new change on top (jj new <rev>) rather than editing it directly
+    #[arg(long)]
+    pub from: Option<String>,
 
     /// Parent directory for workspaces (defaults to ~/.cow/workspaces/)
     #[arg(long)]
