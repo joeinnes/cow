@@ -1,6 +1,6 @@
 ---
 id: cow-9p7x
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-03-03T16:50:00Z
