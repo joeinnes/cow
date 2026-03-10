@@ -342,6 +342,51 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.3 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.3</span>
+          <span class="release-date">2026-03-03</span>
+          <span class="release-tag fix">fixes + improvements</span>
+        </div>
+        <div class="release-body">
+          <h2>Safer creates and tidier output.</h2>
+          <p class="lead">
+            <code>cow create</code> now rolls back atomically on failure and gains a
+            <code>--from</code> flag for branching from an arbitrary revision.
+            <code>cow list</code> contracts home to <code>~</code>, and stale worktree
+            refs left behind by a failed clone are cleaned up automatically.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Improvements</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag feat">feat</span>
+                <code>cow create --from &lt;rev&gt;</code> — branch the new workspace from an
+                arbitrary revision rather than always using the source HEAD.
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                <code>cow create</code> now performs atomic rollback on failure: any partially
+                written workspace directory and git worktree entry are cleaned up before
+                returning an error.
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                Stale git worktree refs left behind by a previous failed clone are pruned
+                automatically on the next <code>cow create</code>.
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                <code>cow list</code> now contracts the home directory to <code>~</code> in
+                path output, keeping lines short on typical setups.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.2 -->
       <div class="release">
         <div class="release-meta">
