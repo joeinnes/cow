@@ -51,7 +51,7 @@ pub fn run(args: ListArgs) -> Result<()> {
     const W_NAME: usize = 14;
     const W_SOURCE: usize = 36;
     const W_BRANCH: usize = 20;
-    const W_STATUS: usize = 7;
+    const W_STATUS: usize = 12;
 
     println!(
         "{:<W_NAME$} {:<W_SOURCE$} {:<W_BRANCH$} {:<W_STATUS$} {}",
@@ -76,14 +76,22 @@ pub fn run(args: ListArgs) -> Result<()> {
             // tarpaulin-ignore-end
         };
 
-        let status_str = if dirty {
-            "dirty".yellow().to_string()
+        let (status_raw_len, status_str) = if dirty {
+            let count = match w.vcs {
+                Vcs::Git => vcs::git_status_short(&w.path).lines().count(),
+                // tarpaulin-ignore-start
+                Vcs::Jj => vcs::jj_diff_summary(&w.path).lines().filter(|l| !l.is_empty()).count(),
+                // tarpaulin-ignore-end
+            };
+            let raw = format!("dirty ({})", count);
+            let len = raw.len();
+            (len, raw.yellow().to_string())
         } else {
-            "clean".green().to_string()
+            ("clean".len(), "clean".green().to_string())
         };
 
         // Pad status manually since ANSI codes bloat the string length
-        let status_padded = format!("{}{}", status_str, " ".repeat(W_STATUS.saturating_sub(5)));
+        let status_padded = format!("{}{}", status_str, " ".repeat(W_STATUS.saturating_sub(status_raw_len)));
 
         let source_str = truncate_path(&contract_home(&w.source.display().to_string()), W_SOURCE - 1);
         let ago = time_ago(w.created_at);

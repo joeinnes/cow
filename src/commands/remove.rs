@@ -67,7 +67,11 @@ pub fn run(args: RemoveArgs) -> Result<()> {
                     for line in short.lines() {
                         eprintln!("  {}", line);
                     }
-                    confirm_or_default("Remove anyway? Changes will be lost.")?
+                    if args.yes {
+                        true
+                    } else {
+                        confirm_or_default("Remove anyway? Changes will be lost.")?
+                    }
                 } else {
                     true
                 }
@@ -82,7 +86,7 @@ pub fn run(args: RemoveArgs) -> Result<()> {
                         name
                     );
                 }
-                if args.force {
+                if args.force || args.yes {
                     true
                 } else {
                     confirm_or_default(&format!("Remove workspace '{}'?", name))?
