@@ -48,24 +48,41 @@ pub fn run(args: ListArgs) -> Result<()> {
     }
 
     // Column widths
-    const W_NAME: usize = 14;
-    const W_SOURCE: usize = 36;
-    const W_BRANCH: usize = 20;
+    const W_NAME: usize = 38;
     const W_STATUS: usize = 12;
+    const W_BRANCH: usize = 20;
 
-    println!(
-        "{:<W_NAME$} {:<W_SOURCE$} {:<W_BRANCH$} {:<W_STATUS$} {}",
-        "NAME", "SOURCE", "BRANCH", "STATUS", "CREATED"
-    );
-    println!("{}", "─".repeat(W_NAME + W_SOURCE + W_BRANCH + W_STATUS + 3 + 15));
+    // Determine whether any workspace has a branch worth showing.
+    let any_branch = workspaces.iter().any(|w| {
+        let branch = match w.vcs {
+            Vcs::Git => vcs::git_current_branch(&w.path)
+                .unwrap_or_else(|| w.branch.clone().unwrap_or_default()),
+            // tarpaulin-ignore-start
+            Vcs::Jj => w.branch.clone().unwrap_or_default(),
+            // tarpaulin-ignore-end
+        };
+        let suffix = w.name.rsplit('/').next().unwrap_or(&w.name);
+        !branch.is_empty() && branch != suffix
+    });
+
+    if any_branch {
+        println!(
+            "{:<W_NAME$} {:<W_STATUS$} {:<W_BRANCH$} {}",
+            "NAME", "STATUS", "BRANCH", "CREATED"
+        );
+        println!("{}", "─".repeat(W_NAME + W_STATUS + W_BRANCH + 3 + 15));
+    } else {
+        println!("{:<W_NAME$} {:<W_STATUS$} {}", "NAME", "STATUS", "CREATED");
+        println!("{}", "─".repeat(W_NAME + W_STATUS + 1 + 15));
+    }
 
     for w in &workspaces {
         // Fetch current branch dynamically (may differ from stored branch)
         let branch = match w.vcs {
             Vcs::Git => vcs::git_current_branch(&w.path)
-                .unwrap_or_else(|| w.branch.clone().unwrap_or_else(|| "-".to_string())),
+                .unwrap_or_else(|| w.branch.clone().unwrap_or_default()),
             // tarpaulin-ignore-start
-            Vcs::Jj => w.branch.clone().unwrap_or_else(|| "-".to_string()),
+            Vcs::Jj => w.branch.clone().unwrap_or_default(),
             // tarpaulin-ignore-end
         };
 
@@ -93,47 +110,41 @@ pub fn run(args: ListArgs) -> Result<()> {
         // Pad status manually since ANSI codes bloat the string length
         let status_padded = format!("{}{}", status_str, " ".repeat(W_STATUS.saturating_sub(status_raw_len)));
 
-        let source_str = truncate_path(&contract_home(&w.source.display().to_string()), W_SOURCE - 1);
+        let name_display = truncate_name(&w.name, W_NAME - 1);
         let ago = time_ago(w.created_at);
 
-        println!(
-            "{:<W_NAME$} {:<W_SOURCE$} {:<W_BRANCH$} {} {}",
-            w.name, source_str, branch, status_padded, ago
-        );
+        // Show branch only when it differs from the name suffix.
+        let name_suffix = w.name.rsplit('/').next().unwrap_or(&w.name);
+        let branch_display = if !branch.is_empty() && branch != name_suffix {
+            branch.as_str()
+        } else {
+            ""
+        };
+
+        if any_branch {
+            println!(
+                "{:<W_NAME$} {} {:<W_BRANCH$} {}",
+                name_display, status_padded, branch_display, ago
+            );
+        } else {
+            println!("{:<W_NAME$} {} {}", name_display, status_padded, ago);
+        }
     }
 
     Ok(())
 }
 
-/// Replace the home directory prefix with `~` so paths stay readable.
-fn contract_home(s: &str) -> String {
-    // Prefer HOME env-var over dirs::home_dir(): on macOS dirs uses
-    // NSHomeDirectory() which ignores the HOME env, so tests that override HOME
-    // would not see their fake home reflected.
-    let home = std::env::var("HOME")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(dirs::home_dir);
-    if let Some(home_path) = home {
-        // Canonicalise to resolve /var → /private/var on macOS, matching the
-        // canonicalised paths stored in workspace state.
-        let home_str = home_path
-            .canonicalize()
-            .unwrap_or(home_path)
-            .display()
-            .to_string();
-        if let Some(rest) = s.strip_prefix(&home_str) {
-            return format!("~{}", rest);
-        }
-    }
-    s.to_string()
-}
 
-fn truncate_path(s: &str, max: usize) -> String {
+/// Truncate a name from the right, appending `…` if it exceeds `max` bytes.
+/// The project prefix (before `/`) is more useful than the suffix, so we keep
+/// the beginning.
+fn truncate_name(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
     } else {
-        format!("…{}", &s[s.len().saturating_sub(max - 1)..])
+        let ellipsis = "…";
+        let cut = max.saturating_sub(ellipsis.len());
+        format!("{}{}", &s[..cut], ellipsis)
     }
 }
 
@@ -163,47 +174,24 @@ mod tests {
     use chrono::Duration;
 
     #[test]
-    fn contract_home_replaces_home_prefix_with_tilde() {
-        // Build a path that starts with the current process's resolved home.
-        let home = std::env::var("HOME")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(dirs::home_dir)
-            .unwrap();
-        let home_canonical = home.canonicalize().unwrap_or(home);
-        let path = home_canonical.join("projects/foo").display().to_string();
-        assert_eq!(contract_home(&path), "~/projects/foo");
+    fn truncate_name_short_unchanged() {
+        assert_eq!(truncate_name("short", 20), "short");
     }
 
     #[test]
-    fn contract_home_unchanged_when_outside_home() {
-        // /private/tmp is guaranteed not to be under HOME on macOS.
-        let result = contract_home("/private/tmp/outside/path");
-        assert_eq!(result, "/private/tmp/outside/path");
+    fn truncate_name_exact_unchanged() {
+        let s = "a".repeat(20);
+        assert_eq!(truncate_name(&s, 20), s);
     }
 
     #[test]
-    fn contract_home_home_dir_itself_becomes_tilde() {
-        let home = std::env::var("HOME")
-            .ok()
-            .map(std::path::PathBuf::from)
-            .or_else(dirs::home_dir)
-            .unwrap();
-        let home_canonical = home.canonicalize().unwrap_or(home).display().to_string();
-        assert_eq!(contract_home(&home_canonical), "~");
-    }
-
-    #[test]
-    fn truncate_path_short_unchanged() {
-        assert_eq!(truncate_path("short", 20), "short");
-    }
-
-    #[test]
-    fn truncate_path_long_gets_ellipsis() {
-        let long = "a".repeat(40);
-        let result = truncate_path(&long, 10);
-        assert!(result.starts_with('…'));
-        assert!(result.len() <= 10 + "…".len()); // ellipsis is multi-byte
+    fn truncate_name_long_gets_ellipsis_at_right() {
+        let long = "brightblur/very-long-branch-name-here";
+        let result = truncate_name(long, 20);
+        assert!(result.ends_with('…'), "should end with ellipsis, got: {}", result);
+        assert!(result.starts_with("brightblur"), "should keep prefix, got: {}", result);
+        // byte length should be at most 20 + len("…") - len("…") = 20
+        assert!(result.len() <= 20, "result too long: {}", result);
     }
 
     #[test]

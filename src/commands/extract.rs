@@ -60,7 +60,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
         match entry.vcs {
             Vcs::Git => {
                 let source = &entry.source;
-                let remote_name = format!("cow-tmp-{}", args.name);
+                let remote_name = format!("cow-tmp-{}", args.name.replace('/', "-"));
 
                 // Register the workspace as a temporary local remote in the source repo.
                 let add_status = Command::new("git")
@@ -110,7 +110,7 @@ pub fn run(args: ExtractArgs) -> Result<()> {
                 // The source is a colocated jj+git repo — plain git remote
                 // operations work on its .git directory.
                 let source = &entry.source;
-                let remote_name = format!("cow-tmp-{}", args.name);
+                let remote_name = format!("cow-tmp-{}", args.name.replace('/', "-"));
 
                 let add_status = Command::new("git")
                     .args(["remote", "add", &remote_name, entry.path.to_str().unwrap()])

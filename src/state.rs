@@ -68,10 +68,10 @@ impl State {
         self.workspaces.retain(|w| w.path.exists());
     }
 
-    /// Generate the next unused `agent-N` name.
-    pub fn next_agent_name(&self) -> String {
+    /// Generate the next unused `{prefix}/agent-N` name.
+    pub fn next_scoped_name(&self, prefix: &str) -> String {
         for i in 1u32.. {
-            let name = format!("agent-{}", i);
+            let name = format!("{}/agent-{}", prefix, i);
             if !self.workspaces.iter().any(|w| w.name == name) {
                 return name;
             }
