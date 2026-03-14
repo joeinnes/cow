@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>cow — Changelog</title>
-  <meta name="description" content="Release history and notable changes for cow, the APFS copy-on-write workspace manager.">
+  <meta name="description" content="Release history and notable changes for cow, the APFS copy-on-write pasture manager.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐄</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -342,6 +342,109 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.5 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.5</span>
+          <span class="release-date">2026-03-05</span>
+          <span class="release-tag feature">improvements</span>
+        </div>
+        <div class="release-body">
+          <h2>Isolated run environment, worktree mode, and smarter dep dirs.</h2>
+          <p class="lead">
+            Five new commands, per-package dependency symlinks, git linked worktree
+            support, and full MCP coverage for agent-driven workflows.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">New commands</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                <code>cow run &lt;name&gt; &lt;cmd&gt;</code> — runs a command inside a pasture's
+                working directory. Auto-detects the package manager from lockfiles and
+                injects shims so install subcommands write to the pasture-local
+                <code>node_modules</code> rather than the shared source. Sets
+                <code>COW_PASTURE</code>, <code>COW_SOURCE</code>, and
+                <code>COW_PASTURE_PATH</code> env vars for the subprocess.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow materialise &lt;name&gt;</code> — replaces symlinked dependency
+                directories in a pasture with real APFS clonefiles, making the pasture
+                fully independent of the source.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow fetch-from &lt;from&gt;</code> — fetches all refs from another
+                pasture into this one, enabling cross-pasture rebase without touching
+                any remote.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow recreate &lt;name&gt;</code> — removes a pasture and re-creates it
+                from the same source, optionally on a different branch.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>cow install</code> — sets up the <code>cowcd</code> shell function and
+                tab completion in <code>~/.zshrc</code> (zsh) or <code>~/.bashrc</code> (bash)
+                automatically. Detects your shell from <code>$SHELL</code>. Idempotent.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">cow create</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                <code>--worktree</code> flag — creates a git linked worktree instead of an
+                APFS clone. All worktree pastures share the same <code>.git/objects/</code>
+                pack store, so cross-pasture rebase works without any remote dance.
+              </li>
+              <li>
+                <span class="tag improved">improved</span>
+                Dependency directories (<code>node_modules</code>, <code>vendor</code>,
+                <code>.venv</code>, <code>Pods</code>, etc.) are now handled with per-package
+                symlinks: each top-level entry is symlinked individually so existing
+                packages are instantly available and new installs write locally to the
+                pasture. Previously the whole directory was symlinked.
+              </li>
+              <li>
+                <span class="tag new">new</span>
+                <code>--no-symlink</code> flag — skips large-directory detection and always
+                performs a full clone.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">jj</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag improved">improved</span>
+                <code>cow status</code> and <code>cow list</code> now show
+                <em>changed</em> instead of <em>dirty</em> for jj pastures, reflecting
+                jj semantics where the working copy is always materialised as a commit.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">MCP</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag new">new</span>
+                <code>cow_migrate</code>, <code>cow_materialise</code>,
+                <code>cow_fetch_from</code>, and <code>cow_run</code> tools added to the
+                MCP server, completing full command coverage for agent-driven workflows.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.4 -->
       <div class="release">
         <div class="release-meta">
@@ -350,9 +453,9 @@
           <span class="release-tag feature">quality of life</span>
         </div>
         <div class="release-body">
-          <h2>Scoped workspace names and better automation.</h2>
+          <h2>Scoped pasture names and better automation.</h2>
           <p class="lead">
-            Workspace names are now scoped by source repository — <code>feature-x</code>
+            Pasture names are now scoped by source repository — <code>feature-x</code>
             becomes <code>brightblur/feature-x</code> automatically. <code>cow list</code>
             drops the SOURCE column (it's encoded in the name) and gets a cleaner layout.
             Adds flags for scripting and non-TTY use: <code>--print-path</code> on create,
@@ -360,13 +463,13 @@
           </p>
 
           <div class="change-group">
-            <span class="change-group-label">Workspace naming</span>
+            <span class="change-group-label">Pasture naming</span>
             <ul class="change-list">
               <li>
                 <span class="tag new">new</span>
                 Names are automatically scoped by source repository basename:
                 <code>cow create feature-x --source ~/repos/brightblur</code> stores the
-                workspace as <code>brightblur/feature-x</code>. Supply an explicit
+                pasture as <code>brightblur/feature-x</code>. Supply an explicit
                 <code>scope/name</code> to override.
               </li>
               <li>
@@ -378,7 +481,7 @@
                 <span class="tag feat">feat</span>
                 <code>cow list</code> redesigned — SOURCE column removed (source is now
                 encoded in the scoped name). Branch column only appears when the branch
-                differs from the workspace name suffix.
+                differs from the pasture name suffix.
               </li>
             </ul>
           </div>
@@ -389,13 +492,13 @@
               <li>
                 <span class="tag new">new</span>
                 <code>cow create --print-path</code> — suppress all output except the final
-                workspace path, making it easy to capture in scripts:
+                pasture path, making it easy to capture in scripts:
                 <code>WS=$(cow create my-feature --print-path)</code>.
               </li>
               <li>
                 <span class="tag new">new</span>
                 <code>cow create -m/--message &lt;MSG&gt;</code> — set the initial jj change
-                description immediately after workspace creation. Removes the separate
+                description immediately after pasture creation. Removes the separate
                 <code>jj describe</code> step (jj repos only).
               </li>
               <li>
@@ -413,7 +516,7 @@
             <ul class="change-list">
               <li>
                 <span class="tag feat">feat</span>
-                <code>cow list</code> now shows a file count next to dirty workspaces
+                <code>cow list</code> now shows a file count next to dirty pastures
                 (e.g. <code>dirty (3)</code>), giving a quick sense of change scope without
                 running <code>cow status</code>.
               </li>
@@ -443,13 +546,13 @@
             <ul class="change-list">
               <li>
                 <span class="tag feat">feat</span>
-                <code>cow create --from &lt;rev&gt;</code> — branch the new workspace from an
+                <code>cow create --from &lt;rev&gt;</code> — branch the new pasture from an
                 arbitrary revision rather than always using the source HEAD.
               </li>
               <li>
                 <span class="tag fix">fix</span>
                 <code>cow create</code> now performs atomic rollback on failure: any partially
-                written workspace directory and git worktree entry are cleaned up before
+                written pasture directory and git worktree entry are cleaned up before
                 returning an error.
               </li>
               <li>
@@ -478,8 +581,8 @@
           <h2>Migrate existing worktrees into cow.</h2>
           <p class="lead">
             Adds <code>cow migrate</code>, which discovers git linked worktrees, jj secondary
-            workspaces, and orphaned cow workspace directories and migrates them into proper
-            cow-managed APFS clone workspaces — so you can adopt cow without starting your
+            workspaces, and orphaned cow pasture directories and migrates them into proper
+            cow-managed APFS clone pastures — so you can adopt cow without starting your
             in-progress branches from scratch.
           </p>
 
@@ -490,7 +593,7 @@
                 <span class="tag new">new</span>
                 <code>cow migrate [--source] [--all] [--force] [--dry-run]</code> — discover
                 and migrate git worktrees, jj workspaces, and orphaned directories into
-                cow-managed workspaces. Git worktrees are replaced with an APFS clone and the
+                cow-managed pastures. Git worktrees are replaced with an APFS clone and the
                 old worktree removed; jj workspaces are re-created with <code>jj workspace add</code>
                 and the old one forgotten; orphaned directories are registered in-place without
                 cloning. Dirty candidates are skipped unless <code>--force</code> is passed.
@@ -529,7 +632,7 @@
           <p class="lead">
             Switches from a <code>cp -Rc</code> subprocess to a direct <code>clonefile(2)</code>
             syscall for a measurable speed improvement on large repos, and fixes several
-            issues with Jujutsu workspace creation.
+            issues with Jujutsu pasture creation.
           </p>
 
           <div class="change-group">
@@ -557,14 +660,14 @@
               <li>
                 <span class="tag fix">fix</span>
                 Pass <code>signing.behavior="drop"</code> to <code>jj workspace add</code> so SSH
-                passphrase prompts are suppressed during workspace creation. jj signs the initial
+                passphrase prompts are suppressed during pasture creation. jj signs the initial
                 workspace commit immediately; this flag suppresses that without touching the
                 user's global jj config.
               </li>
               <li>
                 <span class="tag fix">fix</span>
                 Write cow metadata to <code>.jj/cow-context</code> instead of <code>.cow-context</code>
-                at the workspace root. jj auto-tracks every new file in the working copy, so a
+                at the pasture root. jj auto-tracks every new file in the working copy, so a
                 file at the root appeared as an addition in <code>jj diff</code> and <code>jj status</code>.
                 Content inside <code>.jj/</code> is invisible to jj's working-copy tracking.
               </li>
@@ -584,20 +687,20 @@
           <h2>First public release.</h2>
           <p class="lead">
             cow ships as a Homebrew formula and a Cargo crate (<code>cow-cli</code>),
-            covering the full workspace lifecycle with an MCP server for agent orchestration.
+            covering the full pasture lifecycle with an MCP server for agent orchestration.
           </p>
 
           <div class="change-group">
             <span class="change-group-label">Commands</span>
             <ul class="change-list">
-              <li><span class="tag new">new</span> <code>cow create</code> — clone a repo into an isolated APFS workspace</li>
-              <li><span class="tag new">new</span> <code>cow list</code> — list all active workspaces, with optional JSON output</li>
-              <li><span class="tag new">new</span> <code>cow status</code> — detailed workspace status including diff summary</li>
+              <li><span class="tag new">new</span> <code>cow create</code> — clone a repo into an isolated APFS pasture</li>
+              <li><span class="tag new">new</span> <code>cow list</code> — list all active pastures, with optional JSON output</li>
+              <li><span class="tag new">new</span> <code>cow status</code> — detailed pasture status including diff summary</li>
               <li><span class="tag new">new</span> <code>cow diff</code> — passthrough to <code>git diff</code> or <code>jj diff</code></li>
               <li><span class="tag new">new</span> <code>cow extract</code> — extract changes back to source as patch or branch</li>
-              <li><span class="tag new">new</span> <code>cow remove</code> — remove workspaces, with dirty-state warnings</li>
-              <li><span class="tag new">new</span> <code>cow sync</code> — fetch and rebase workspace onto source repo changes</li>
-              <li><span class="tag new">new</span> <code>cow cd</code> — print workspace path for shell integration</li>
+              <li><span class="tag new">new</span> <code>cow remove</code> — remove pastures, with dirty-state warnings</li>
+              <li><span class="tag new">new</span> <code>cow sync</code> — fetch and rebase pasture onto source repo changes</li>
+              <li><span class="tag new">new</span> <code>cow cd</code> — print pasture path for shell integration</li>
               <li><span class="tag new">new</span> <code>cow mcp</code> — run as an MCP stdio server for AI orchestrators</li>
             </ul>
           </div>

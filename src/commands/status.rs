@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::{cli::StatusArgs, state::State, vcs::{self, Vcs}};
+use crate::{cli::StatusArgs, state::{State, PastureEntry}, vcs::{self, Vcs}};
 
 pub fn run(args: StatusArgs) -> Result<()> {
     let mut state = State::load()?;
@@ -11,7 +11,7 @@ pub fn run(args: StatusArgs) -> Result<()> {
     let entry = state
         .get(&name)
         .cloned()
-        .with_context(|| format!("Workspace '{}' not found.", name))?;
+        .with_context(|| format!("Pasture '{}' not found.", name))?;
 
     let (is_dirty, modified_files_str) = match entry.vcs {
         Vcs::Git => {
@@ -58,10 +58,17 @@ pub fn run(args: StatusArgs) -> Result<()> {
         return Ok(());
     }
 
-    let status_str = if is_dirty { "dirty" } else { "clean" };
+    // For jj repos, "dirty" would mislead — jj's working copy is always a commit.
+    // Use "changed" to reflect jj semantics (pending working-copy changes).
+    let status_str = match (&entry.vcs, is_dirty) {
+        (Vcs::Git, true) => "dirty",
+        (Vcs::Git, false) => "clean",
+        (Vcs::Jj, true) => "changed (jj working copy)",
+        (Vcs::Jj, false) => "clean",
+    };
     let disk_delta = estimate_disk_delta(&entry);
 
-    println!("Workspace:  {}", entry.name);
+    println!("🐄 Pasture:  {}", entry.name);
     println!("Source:     {}", entry.source.display());
     println!("Branch:     {}", branch);
     println!("VCS:        {}", entry.vcs);
@@ -71,8 +78,27 @@ pub fn run(args: StatusArgs) -> Result<()> {
         entry.created_at.format("%Y-%m-%d %H:%M:%S UTC")
     );
 
+    if entry.is_worktree {
+        println!("Mode:       worktree (shared .git/objects/)");
+    }
+
     if let Some(bytes) = disk_delta {
         println!("Disk delta: {} (estimated from modified file sizes)", format_bytes(bytes));
+    }
+
+    if !entry.symlinked_dirs.is_empty() {
+        println!(
+            "\n⚠  Shared with source (whole-dir): {}",
+            entry.symlinked_dirs.iter().map(|d| format!("{}/", d)).collect::<Vec<_>>().join(", ")
+        );
+        println!("   Run 'cow materialise {}' for a fully independent clone.", entry.name);
+    }
+    if !entry.linked_dirs.is_empty() {
+        println!(
+            "\n⚠  Per-package symlinks (new installs are local): {}",
+            entry.linked_dirs.iter().map(|d| format!("{}/", d)).collect::<Vec<_>>().join(", ")
+        );
+        println!("   Run 'cow materialise {}' to fully clone existing packages.", entry.name);
     }
 
     if !modified_files_str.trim().is_empty() {
@@ -93,7 +119,7 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
     let cwd = std::env::current_dir().context("Cannot determine current directory")?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     state
-        .workspaces
+        .pastures
         .iter()
         .find(|w| {
             let wp = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
@@ -101,11 +127,11 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
         })
         .map(|w| w.name.clone())
         .context(
-            "Not in a cow workspace. Specify a workspace name or run from inside a workspace.",
+            "Not in a cow pasture. Specify a pasture name or run from inside a pasture.",
         )
 }
 
-fn estimate_disk_delta(entry: &crate::state::WorkspaceEntry) -> Option<u64> {
+fn estimate_disk_delta(entry: &PastureEntry) -> Option<u64> {
     if !entry.path.exists() {
         return None;
     }

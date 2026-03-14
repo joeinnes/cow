@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>cow — udderly instant workspaces</title>
-  <meta name="description" content="Clone your entire git repo using APFS copy-on-write in milliseconds. No disk overhead. Point AI agents at each workspace and ship in parallel.">
+  <title>cow — udderly instant pastures</title>
+  <meta name="description" content="Clone your entire git repo using APFS copy-on-write in milliseconds. No disk overhead. Point AI agents at each pasture and ship in parallel.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐄</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -551,12 +551,12 @@
   <section id="hero">
     <div class="container">
       <span class="hero-cow" aria-hidden="true">🐄</span>
-      <h1>Udderly instant workspaces.</h1>
+      <h1>Udderly instant pastures.</h1>
       <p class="hero-pun">yes, it's called <code>cow</code>. as in Copy-On-Write. we have no regrets.</p>
       <p class="hero-desc">
         Clone your entire git repo — node_modules, build outputs, .env files and all —
         in milliseconds with near-zero disk overhead. Point an AI coding agent
-        at each workspace and let them work in parallel.
+        at each pasture and let them work in parallel.
       </p>
 
       <button
@@ -598,7 +598,7 @@
       <span class="section-label">the alternatives</span>
       <h2>Every other approach is udderly wrong.</h2>
       <p class="section-intro">
-        Running multiple AI coding agents in parallel means multiple isolated workspaces.
+        Running multiple AI coding agents in parallel means multiple isolated pastures.
         Here is what you are up against otherwise.
       </p>
 
@@ -649,26 +649,26 @@
           <div class="step-num">2</div>
           <div class="step-body">
             <h3>Checkout or create a branch</h3>
-            <p>Optionally check out an existing branch or create a new one in the workspace. It is a fully independent git repo with its own HEAD, index, and working tree.</p>
+            <p>Optionally check out an existing branch or create a new one in the pasture. It is a fully independent git repo with its own HEAD, index, and working tree.</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">3</div>
           <div class="step-body">
             <h3>Clean up runtime artefacts</h3>
-            <p>Removes <code>.pid</code>, <code>.sock</code>, and <code>.socket</code> files that should not be shared between workspaces. Reads <code>.cow.json</code> for project-specific cleanup rules and post-clone commands.</p>
+            <p>Removes <code>.pid</code>, <code>.sock</code>, and <code>.socket</code> files that should not be shared between pastures. Reads <code>.cow.json</code> for project-specific cleanup rules and post-clone commands.</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">4</div>
           <div class="step-body">
             <h3>Point your agent at it</h3>
-            <p>Each workspace lands in <code>~/.cow/workspaces/{name}</code>. Open Claude Code, Cursor, or Aider in each one. They work in complete isolation until you extract their changes.</p>
+            <p>Each pasture lands in <code>~/.cow/pastures/{name}</code>. Open Claude Code, Cursor, or Aider in each one. They work in complete isolation until you extract their changes.</p>
           </div>
         </div>
       </div>
 
-      <svg class="cow-diagram-svg" viewBox="0 0 760 266" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="cow create forks one main repo into four parallel agent workspaces">
+      <svg class="cow-diagram-svg" viewBox="0 0 760 266" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="cow create forks one main repo into four parallel agent pastures">
         <defs>
           <filter id="card-shadow" x="-8%" y="-8%" width="116%" height="130%">
             <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(24,19,10,0.10)"/>
@@ -706,7 +706,7 @@
         <circle cx="473" cy="156" r="3.5" fill="#3a6b35"/>
         <circle cx="660" cy="156" r="3.5" fill="#3a6b35"/>
 
-        <!-- ── Workspace boxes ── -->
+        <!-- ── Pasture boxes ── -->
         <!-- agent-1 -->
         <rect x="20" y="156" width="160" height="96" rx="8" fill="#faf7f0" stroke="#3a6b35" stroke-width="1.5" filter="url(#card-shadow)"/>
         <text x="100" y="180" font-family="'Playfair Display', Georgia, serif" font-size="13" font-weight="700" text-anchor="middle" fill="#18130a">agent-1</text>
@@ -767,24 +767,24 @@
         <div class="terminal-content">
 
           <div class="tab-panel active" id="tab-create">
-            <span class="t-line t-out"># create a named workspace; --branch overrides the branch name</span>
+            <span class="t-line t-out"># create a named pasture; --branch overrides the branch name</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow create feat-auth --source ~/my-project --branch feat/auth</span></span>
             <span class="t-line t-out">Cloning /Users/joe/my-project ...</span>
-            <span class="t-line t-ok">Created workspace 'feat-auth' at ~/.cow/workspaces/feat-auth</span>
+            <span class="t-line t-ok">🐄 Created pasture 'feat-auth' at ~/.cow/pastures/feat-auth</span>
             <span class="t-line">&nbsp;</span>
             <span class="t-line t-out"># omit the name and cow auto-generates agent-1, agent-2, …</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow create --source ~/my-project</span></span>
             <span class="t-line t-out">Cloning /Users/joe/my-project ...</span>
-            <span class="t-line t-ok">Created workspace 'agent-1' at ~/.cow/workspaces/agent-1</span>
+            <span class="t-line t-ok">🐄 Created pasture 'agent-1' at ~/.cow/pastures/agent-1</span>
           </div>
 
           <div class="tab-panel" id="tab-list">
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow list</span></span>
-            <span class="t-line t-out">NAME           SOURCE                               BRANCH               STATUS  CREATED</span>
-            <span class="t-line t-out">──────────────────────────────────────────────────────────────────────────────────────</span>
-            <span class="t-line"><span class="t-out">agent-1        ~/my-project                         feat/auth            </span><span class="t-ok">clean  </span><span class="t-out"> 5 minutes ago</span></span>
-            <span class="t-line"><span class="t-out">agent-2        ~/my-project                         feat/api             </span><span class="t-info">dirty  </span><span class="t-out"> 8 minutes ago</span></span>
-            <span class="t-line"><span class="t-out">feat-auth      ~/my-project                         feat/auth            </span><span class="t-ok">clean  </span><span class="t-out"> 12 minutes ago</span></span>
+            <span class="t-line t-out">NAME                     STATUS       BRANCH       CREATED</span>
+            <span class="t-line t-out">────────────────────────────────────────────────────────────</span>
+            <span class="t-line"><span class="t-out">my-project/agent-1       </span><span class="t-ok">clean        </span><span class="t-out">             5 minutes ago</span></span>
+            <span class="t-line"><span class="t-out">my-project/agent-2       </span><span class="t-info">dirty (2)    </span><span class="t-out">feat/api     8 minutes ago</span></span>
+            <span class="t-line"><span class="t-out">my-project/feat-auth     </span><span class="t-ok">clean        </span><span class="t-out">             12 minutes ago</span></span>
             <span class="t-line">&nbsp;</span>
             <span class="t-line t-out"># --json for scripts and MCP tools</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow list --json</span></span>
@@ -792,17 +792,17 @@
           </div>
 
           <div class="tab-panel" id="tab-remove">
-            <span class="t-line t-out"># prompts when workspace has uncommitted changes</span>
+            <span class="t-line t-out"># prompts when pasture has uncommitted changes</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove agent-2</span></span>
-            <span class="t-line t-info">⚠ Workspace 'agent-2' has uncommitted changes:</span>
+            <span class="t-line t-info">⚠ Pasture 'agent-2' has uncommitted changes:</span>
             <span class="t-line t-out">   M src/api/routes.rs</span>
             <span class="t-line t-out">Remove anyway? Changes will be lost. [y/N]: </span><span class="t-cmd">y</span>
-            <span class="t-line t-ok">Removed workspace 'agent-2'</span>
+            <span class="t-line t-ok">🐄 Removed pasture 'agent-2'</span>
             <span class="t-line">&nbsp;</span>
             <span class="t-line t-out"># --force skips the prompt</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove --force agent-1 feat-auth</span></span>
-            <span class="t-line t-ok">Removed workspace 'agent-1'</span>
-            <span class="t-line t-ok">Removed workspace 'feat-auth'</span>
+            <span class="t-line t-ok">🐄 Removed pasture 'agent-1'</span>
+            <span class="t-line t-ok">🐄 Removed pasture 'feat-auth'</span>
           </div>
 
           <div class="tab-panel" id="tab-extract">
@@ -816,12 +816,12 @@
             <span class="t-line">&nbsp;</span>
             <span class="t-line t-out"># clean up</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow remove --force agent-2</span></span>
-            <span class="t-line t-ok">Removed workspace 'agent-2'</span>
+            <span class="t-line t-ok">🐄 Removed pasture 'agent-2'</span>
           </div>
 
           <div class="tab-panel" id="tab-status">
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow status agent-2</span></span>
-            <span class="t-line t-out">Workspace:  agent-2</span>
+            <span class="t-line t-ok">🐄 Pasture:  agent-2</span>
             <span class="t-line t-out">Source:     /Users/joe/my-project</span>
             <span class="t-line t-out">Branch:     feat/api</span>
             <span class="t-line t-out">VCS:        git</span>
@@ -847,12 +847,12 @@
             <span class="t-line t-out">[dry-run] Would migrate 'feat-auth' (/Users/joe/my-project-feat-auth)</span>
             <span class="t-line t-out">[dry-run] Would migrate 'feat-api' (/Users/joe/my-project-feat-api)</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># migrate all candidates (skips dirty workspaces)</span>
+            <span class="t-line t-out"># migrate all candidates (skips dirty pastures)</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project --all</span></span>
             <span class="t-line t-out">Skipping 'feat-api' — has uncommitted changes (use --force to override).</span>
             <span class="t-line t-ok">Migrated 'feat-auth'</span>
             <span class="t-line">&nbsp;</span>
-            <span class="t-line t-out"># migrate everything, including dirty workspaces</span>
+            <span class="t-line t-out"># migrate everything, including dirty pastures</span>
             <span class="t-line"><span class="t-prompt">$</span> <span class="t-cmd">cow migrate --source ~/my-project --all --force</span></span>
             <span class="t-line t-ok">Migrated 'feat-api'</span>
           </div>
@@ -891,7 +891,7 @@
               <td class="nope">3–8 minutes</td>
             </tr>
             <tr>
-              <td>Extra disk per workspace</td>
+              <td>Extra disk per pasture</td>
               <td class="hl-col ok">~0 until modified</td>
               <td class="meh">~0 (no modules)</td>
               <td class="nope">full copy × N</td>
@@ -958,14 +958,14 @@
       <span class="section-label">ai integration</span>
       <h2>A first-class MCP server.</h2>
       <p class="section-intro">
-        Run <code>cow mcp</code> to expose workspace management as MCP tools.
-        Your AI orchestrator can create and tear down workspaces without shelling out.
+        Run <code>cow mcp</code> to expose pasture management as MCP tools.
+        Your AI orchestrator can create and tear down pastures without shelling out.
       </p>
 
       <div class="mcp-grid">
         <div class="mcp-desc">
           <h3>Add to Claude Code</h3>
-          <p>Drop this snippet into your <code>~/.claude.json</code> or a project-local <code>.mcp.json</code> to let Claude manage its own workspaces on your behalf.</p>
+          <p>Drop this snippet into your <code>~/.claude.json</code> or a project-local <code>.mcp.json</code> to let Claude manage its own pastures on your behalf.</p>
           <p>Exposes four MCP tools: <code>cow_create</code>, <code>cow_list</code>, <code>cow_remove</code>, <code>cow_status</code>.</p>
           <p>Communicates over stdio — no ports, no background daemons, no port conflicts.</p>
         </div>

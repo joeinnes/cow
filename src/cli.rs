@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "cow",
-    about = "Copy-on-write workspace manager for parallel development",
+    about = "Copy-on-write pasture manager for parallel development",
     version
 )]
 pub struct Cli {
@@ -14,39 +14,49 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Create a new workspace using APFS copy-on-write
+    /// Create a new cow pasture (copy-on-write workspace) using APFS. 'create a cow pasture' → this command.
     Create(CreateArgs),
-    /// List all active workspaces
+    /// List all active pastures
     List(ListArgs),
-    /// Remove one or more workspaces
+    /// Remove one or more pastures
     Remove(RemoveArgs),
-    /// Show detailed status of a workspace
+    /// Show detailed status of a pasture
     Status(StatusArgs),
-    /// Show changes in a workspace relative to its last commit
+    /// Show changes in a pasture relative to its last commit
     Diff(DiffArgs),
-    /// Extract changes from a workspace as a patch or branch
+    /// Extract changes from a pasture as a patch or branch
     Extract(ExtractArgs),
-    /// Print the path of a workspace (for shell cd integration)
+    /// Print the path of a pasture (for shell cd integration)
     Cd(CdArgs),
-    /// Sync a workspace with its source repository
+    /// Sync a pasture with its source repository
     Sync(SyncArgs),
-    /// Migrate existing git worktrees, jj workspaces, or orphaned directories to cow workspaces
+    /// Migrate existing git worktrees, jj workspaces, or orphaned directories to cow pastures
     Migrate(MigrateArgs),
+    /// Remove a pasture and re-create it from the same source
+    Recreate(RecreateArgs),
+    /// Run a command inside a pasture's working directory
+    Run(RunArgs),
+    /// Replace symlinked directories in a pasture with real clonefiles
+    Materialise(MaterialiseArgs),
+    /// Fetch refs from another pasture into the current one (enables cross-pasture rebase)
+    FetchFrom(FetchFromArgs),
+    /// Install cowcd shell function and tab completion into your shell config
+    Install,
     /// Run as a Model Context Protocol (MCP) stdio server
     Mcp,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct CreateArgs {
-    /// Name for the new workspace (auto-generated if omitted)
+    /// Name for the new pasture (auto-generated if omitted)
     pub name: Option<String>,
 
     /// Source repository path (defaults to current directory)
     #[arg(long)]
     pub source: Option<PathBuf>,
 
-    /// Git branch to check out in the new workspace (created if it does not exist).
-    /// Defaults to the workspace name when a name is given.
+    /// Git branch to check out in the new pasture (created if it does not exist).
+    /// Defaults to the pasture name when a name is given.
     #[arg(long)]
     pub branch: Option<String>,
 
@@ -54,7 +64,7 @@ pub struct CreateArgs {
     #[arg(long)]
     pub no_branch: bool,
 
-    /// jj change to edit directly in the new workspace (jj edit <change>). Use --from to branch from a change instead.
+    /// jj change to edit directly in the new pasture (jj edit <change>). Use --from to branch from a change instead.
     #[arg(long)]
     pub change: Option<String>,
 
@@ -62,7 +72,7 @@ pub struct CreateArgs {
     #[arg(long)]
     pub from: Option<String>,
 
-    /// Parent directory for workspaces (defaults to ~/.cow/workspaces/)
+    /// Parent directory for pastures (defaults to ~/.cow/pastures/)
     #[arg(long)]
     pub dir: Option<PathBuf>,
 
@@ -74,14 +84,24 @@ pub struct CreateArgs {
     #[arg(long, short = 'm')]
     pub message: Option<String>,
 
-    /// Print only the workspace path on stdout after creation (suppress other output)
+    /// Print only the pasture path on stdout after creation (suppress other output)
     #[arg(long)]
     pub print_path: bool,
+
+    /// Skip large-directory auto-detection and always do a full clone
+    #[arg(long)]
+    pub no_symlink: bool,
+
+    /// Create a git linked worktree instead of a CoW clone (git repos only).
+    /// All pastures share the same .git/objects/ — cross-pasture rebase works
+    /// without any remote dance.
+    #[arg(long)]
+    pub worktree: bool,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct ListArgs {
-    /// Only show workspaces created from this source repo
+    /// Only show pastures created from this source repo
     #[arg(long)]
     pub source: Option<PathBuf>,
 
@@ -92,7 +112,7 @@ pub struct ListArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct RemoveArgs {
-    /// Workspace names to remove
+    /// Pasture names to remove
     pub names: Vec<String>,
 
     /// Skip dirty-state warnings and remove immediately
@@ -103,18 +123,18 @@ pub struct RemoveArgs {
     #[arg(long, short = 'y')]
     pub yes: bool,
 
-    /// Remove all workspaces (can be combined with --source)
+    /// Remove all pastures (can be combined with --source)
     #[arg(long)]
     pub all: bool,
 
-    /// Only remove workspaces from this source repo
+    /// Only remove pastures from this source repo
     #[arg(long)]
     pub source: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct StatusArgs {
-    /// Workspace name (defaults to current directory if it is a workspace)
+    /// Pasture name (defaults to current directory if it is a pasture)
     pub name: Option<String>,
 
     /// Output as JSON
@@ -124,22 +144,22 @@ pub struct StatusArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct DiffArgs {
-    /// Workspace name (defaults to current directory if it is a workspace)
+    /// Pasture name (defaults to current directory if it is a pasture)
     pub name: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct CdArgs {
-    /// Workspace name
+    /// Pasture name
     pub name: String,
 }
 
 #[derive(clap::Args, Debug)]
 pub struct SyncArgs {
-    /// Branch in the source repo to sync from (defaults to workspace's current branch)
+    /// Branch in the source repo to sync from (defaults to pasture's current branch)
     pub source_branch: Option<String>,
 
-    /// Workspace name (defaults to current directory)
+    /// Pasture name (defaults to current directory)
     #[arg(long, short = 'n')]
     pub name: Option<String>,
 
@@ -168,8 +188,32 @@ pub struct MigrateArgs {
 }
 
 #[derive(clap::Args, Debug)]
+pub struct RecreateArgs {
+    /// Pasture name to recreate
+    pub name: String,
+
+    /// Override the branch checked out in the fresh clone
+    #[arg(long)]
+    pub branch: Option<String>,
+
+    /// Do not switch or create a branch (stay on source's current branch)
+    #[arg(long)]
+    pub no_branch: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct RunArgs {
+    /// Pasture name
+    pub name: String,
+
+    /// Command and arguments to run
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+    pub command: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
 pub struct ExtractArgs {
-    /// Workspace name
+    /// Pasture name
     pub name: String,
 
     /// Write changes as a patch file
@@ -179,4 +223,24 @@ pub struct ExtractArgs {
     /// Push the workspace branch to origin under this name
     #[arg(long)]
     pub branch: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct MaterialiseArgs {
+    /// Pasture name
+    pub name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct FetchFromArgs {
+    /// Name of the pasture to fetch from
+    pub from: String,
+
+    /// Name of the pasture to fetch into (defaults to current directory)
+    #[arg(long, short = 'n')]
+    pub name: Option<String>,
+
+    /// Allow fetching from a pasture with a different source repo
+    #[arg(long)]
+    pub force: bool,
 }

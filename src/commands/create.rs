@@ -1,14 +1,20 @@
 use anyhow::{bail, Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::{
     cli::CreateArgs,
-    state::{self, State, WorkspaceEntry},
+    state::{self, State, PastureEntry},
     vcs::{self, Vcs},
 };
 #[cfg(target_os = "macos")]
 use crate::apfs;
+
+/// Directory names that use per-package symlinks rather than whole-dir symlinks
+/// when they exceed the large-dir threshold.
+const DEP_DIR_NAMES: &[&str] = &[
+    "node_modules", "vendor", ".venv", "venv", "env", "Pods", "bower_components",
+];
 
 pub fn run(args: CreateArgs) -> Result<()> {
     // Resolve source path
@@ -22,6 +28,11 @@ pub fn run(args: CreateArgs) -> Result<()> {
     // Detect VCS
     let detected_vcs = vcs::detect_vcs(&source)
         .context("No VCS found. Source must be a git or jj repository.")?;
+
+    // --worktree requires git
+    if args.worktree && detected_vcs != Vcs::Git {
+        bail!("--worktree is only supported for git repositories.");
+    }
 
     // Reject git worktrees as sources
     if detected_vcs == Vcs::Git && vcs::is_git_worktree(&source) {
@@ -41,10 +52,10 @@ pub fn run(args: CreateArgs) -> Result<()> {
         );
     }
 
-    // APFS check (macOS only — on Linux we attempt reflink and fall back gracefully)
+    // APFS check (macOS only; worktrees don't use clonefile so skip for them)
     // tarpaulin-ignore-start
     #[cfg(target_os = "macos")]
-    if !apfs::is_apfs(&source) {
+    if !args.worktree && !apfs::is_apfs(&source) {
         bail!(
             "Source filesystem is not APFS. cow requires APFS for copy-on-write clones on macOS.\n\
              Run `diskutil info {}` to see the filesystem type.",
@@ -57,7 +68,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
     if source.join(".gitmodules").exists() {
         eprintln!(
             "Warning: source repository has git submodules. \
-             Submodule support is untested and may produce a broken workspace."
+             Submodule support is untested and may produce a broken pasture."
         );
     }
 
@@ -65,30 +76,28 @@ pub fn run(args: CreateArgs) -> Result<()> {
     let mut state = State::load()?;
     state.prune_deleted();
 
-    // Workspace parent directory
+    // Pasture parent directory
     let has_custom_dir = args.dir.is_some();
-    let workspace_dir = match args.dir {
+    let pasture_dir = match args.dir {
         Some(d) => d,
-        None => state::default_workspace_dir()?,
+        None => state::default_pasture_dir()?,
     };
 
-    // Source basename used to scope the workspace name.
+    // Source basename used to scope the pasture name.
     let basename = source
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("workspace")
+        .unwrap_or("pasture")
         .to_string();
 
-    // Workspace name
+    // Pasture name
     let name_was_given = args.name.is_some();
     let name = match args.name {
         Some(n) => {
             if n.contains('/') {
-                // User supplied an explicit scope — validate the whole thing.
                 validate_name(&n)?;
                 n
             } else {
-                // Auto-scope: prepend source basename.
                 validate_name(&n)?;
                 format!("{}/{}", basename, n)
             }
@@ -96,7 +105,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
         None => state.next_scoped_name(&basename),
     };
 
-    // Default: use the unscoped part of the workspace name as the branch when
+    // Default: use the unscoped part of the pasture name as the branch when
     // the caller gave an explicit name and did not pass --branch or --no-branch.
     let name_suffix = name.rsplit('/').next().unwrap_or(&name).to_string();
     let branch_arg = if args.branch.is_none() && !args.no_branch && name_was_given {
@@ -107,15 +116,14 @@ pub fn run(args: CreateArgs) -> Result<()> {
 
     // Uniqueness check
     if state.get(&name).is_some() {
-        bail!("A workspace named '{}' already exists. Choose a different name.", name);
+        bail!("A pasture named '{}' already exists. Choose a different name.", name);
     }
 
-    // With --dir, use just the unscoped name suffix as the directory name so
-    // the workspace lands exactly at <dir>/<suffix> rather than <dir>/<scope>/<suffix>.
+    // With --dir, use just the unscoped name suffix as the directory name.
     let dest = if has_custom_dir {
-        workspace_dir.join(&name_suffix)
+        pasture_dir.join(&name_suffix)
     } else {
-        workspace_dir.join(&name)
+        pasture_dir.join(&name)
     };
     if dest.exists() {
         bail!(
@@ -125,21 +133,74 @@ pub fn run(args: CreateArgs) -> Result<()> {
         );
     }
 
-    // dest may have a sub-directory component (e.g. workspaces/project/name),
-    // so create all parents up to but not including dest itself.
+    // Create all parent directories up to but not including dest itself.
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create workspace directory: {}", parent.display()))?;
+            .with_context(|| format!("Failed to create pasture directory: {}", parent.display()))?;
     }
 
-    // CoW clone
+    // --worktree path: delegate entirely to git worktree add.
+    if args.worktree {
+        return run_worktree(&source, &dest, &name, branch_arg.as_deref(), args.print_path, &mut state);
+    }
+
+    // Detect large dirs to symlink (macOS + git only; skip when --no-symlink).
+    // Split into dep dirs (per-package symlinks) and plain large dirs (whole-dir symlinks).
+    #[cfg(target_os = "macos")]
+    let (dep_candidates, whole_candidates): (Vec<(PathBuf, usize)>, Vec<(PathBuf, usize)>) = {
+        if !args.no_symlink && detected_vcs == Vcs::Git {
+            let threshold = read_symlink_threshold(&source).unwrap_or(10_000);
+            let all = find_symlink_candidates(&source, threshold)?;
+            all.into_iter().partition(|(p, _)| is_dep_dir(p))
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let (dep_candidates, whole_candidates): (Vec<(PathBuf, usize)>, Vec<(PathBuf, usize)>) =
+        (Vec::new(), Vec::new());
+
+    // Print symlink warning BEFORE any other output.
+    let has_any_candidates = !dep_candidates.is_empty() || !whole_candidates.is_empty();
+    if has_any_candidates && !args.print_path {
+        println!("⚠  Large directories handled to avoid inode overhead:");
+        for (path, _) in &dep_candidates {
+            let pkg_count = std::fs::read_dir(source.join(path))
+                .map(|rd| rd.count())
+                .unwrap_or(0);
+            println!(
+                "     {}/   {}  (per-package, new installs will be local)",
+                path.display(),
+                format_count(pkg_count)
+            );
+        }
+        for (path, count) in &whole_candidates {
+            println!(
+                "     {}/   {}  (shared with source — writes affect source)",
+                path.display(),
+                format_count(*count)
+            );
+        }
+        println!("   To fully clone: cow materialise {}", name);
+        println!();
+    }
+
+    // Regular output
     if !args.print_path {
-        println!("Cloning {} ...", source.display());
+        println!("Detected VCS: {}", detected_vcs);
+        println!("🐄 Cloning {} ...", source.display());
     }
-    cow_clone(&source, &dest, &detected_vcs)?;
+    cow_clone(&source, &dest, &detected_vcs, &whole_candidates, &dep_candidates)?;
 
-    // All post-clone steps. If any fail the clone is rolled back so the user
-    // is never left with an orphaned directory or dangling jj workspace record.
+    // All post-clone steps. If any fail the clone is rolled back.
+    let symlinked_dir_strings: Vec<String> = whole_candidates
+        .iter()
+        .map(|(p, _)| p.to_string_lossy().into_owned())
+        .collect();
+    let linked_dir_strings: Vec<String> = dep_candidates
+        .iter()
+        .map(|(p, _)| p.to_string_lossy().into_owned())
+        .collect();
     let setup_result = post_clone_setup(
         &source,
         &dest,
@@ -150,11 +211,13 @@ pub fn run(args: CreateArgs) -> Result<()> {
         args.message.as_deref(),
         args.no_clean,
         &name,
+        symlinked_dir_strings,
+        linked_dir_strings,
         &mut state,
     );
 
     if let Err(ref e) = setup_result {
-        eprintln!("cow: workspace setup failed — rolling back: {:#}", e);
+        eprintln!("cow: pasture setup failed — rolling back: {:#}", e);
         rollback_clone(&source, &dest, &detected_vcs);
         return setup_result;
     }
@@ -163,7 +226,7 @@ pub fn run(args: CreateArgs) -> Result<()> {
         println!("{}", dest.display());
     } else {
         let has_cow_json = source.join(".cow.json").exists();
-        println!("Created workspace '{}' at {}", name, dest.display());
+        println!("🐄 Created pasture '{}' at {}", name, dest.display());
         println!("To remove: cow remove {}", name);
         if !has_cow_json {
             println!(
@@ -171,6 +234,98 @@ pub fn run(args: CreateArgs) -> Result<()> {
                  See the README for details."
             );
         }
+    }
+    Ok(())
+}
+
+/// Create a pasture as a git linked worktree instead of a CoW clone.
+fn run_worktree(
+    source: &Path,
+    dest: &Path,
+    name: &str,
+    branch: Option<&str>,
+    print_path: bool,
+    state: &mut State,
+) -> Result<()> {
+    // Build the git worktree add command.
+    let mut cmd_args = vec!["worktree", "add"];
+
+    // Determine whether to create a new branch, check out an existing one,
+    // or detach HEAD.
+    let branch_exists = branch.map(|b| git_branch_exists(source, b)).unwrap_or(false);
+    let branch_in_use = branch.map(|b| git_branch_in_worktree(source, b)).unwrap_or(false);
+
+    if branch_in_use {
+        bail!(
+            "Branch '{}' is already checked out in another worktree. \
+             Choose a different name, or use --no-branch to detach.",
+            branch.unwrap()
+        );
+    }
+
+    // Collect extra args before appending dest/branch so lifetimes work.
+    let new_branch_flag;
+    let branch_name;
+    let extra: Vec<&str> = if let Some(b) = branch {
+        if branch_exists {
+            branch_name = b.to_string();
+            cmd_args.push(dest.to_str().unwrap());
+            cmd_args.push(&branch_name);
+            vec![]
+        } else {
+            new_branch_flag = format!("-b");
+            branch_name = b.to_string();
+            cmd_args.push(&new_branch_flag);
+            cmd_args.push(&branch_name);
+            cmd_args.push(dest.to_str().unwrap());
+            vec![]
+        }
+    } else {
+        cmd_args.push("--detach");
+        cmd_args.push(dest.to_str().unwrap());
+        vec![]
+    };
+    let _ = extra; // suppress unused warning
+
+    if !print_path {
+        println!("Detected VCS: git");
+        println!("🐄 Creating worktree at {} ...", dest.display());
+    }
+
+    let status = Command::new("git")
+        .args(&cmd_args)
+        .current_dir(source)
+        .status()
+        .context("Failed to run git worktree add")?;
+    if !status.success() {
+        bail!("git worktree add failed for '{}'.", dest.display());
+    }
+
+    let initial_commit = vcs::git_head_sha(dest);
+    let resolved_branch = branch.map(|b| b.to_string())
+        .or_else(|| vcs::git_current_branch(dest));
+
+    let entry = PastureEntry {
+        name: name.to_string(),
+        path: dest.to_path_buf(),
+        source: source.to_path_buf(),
+        vcs: Vcs::Git,
+        branch: resolved_branch,
+        initial_commit,
+        created_at: chrono::Utc::now(),
+        symlinked_dirs: Vec::new(),
+        linked_dirs: Vec::new(),
+        is_worktree: true,
+    };
+    state.add(entry.clone());
+    state.save()?;
+    write_context_file(&entry)?;
+
+    if print_path {
+        println!("{}", dest.display());
+    } else {
+        println!("🐄 Created worktree pasture '{}' at {}", name, dest.display());
+        println!("To remove: cow remove {}", name);
     }
     Ok(())
 }
@@ -187,6 +342,8 @@ fn post_clone_setup(
     message: Option<&str>,
     no_clean: bool,
     name: &str,
+    symlinked_dirs: Vec<String>,
+    linked_dirs: Vec<String>,
     state: &mut State,
 ) -> Result<()> {
     let initial_commit = if *detected_vcs == Vcs::Git {
@@ -215,7 +372,7 @@ fn post_clone_setup(
         }
     }
 
-    let entry = WorkspaceEntry {
+    let entry = PastureEntry {
         name: name.to_string(),
         path: dest.to_path_buf(),
         source: source.to_path_buf(),
@@ -223,6 +380,9 @@ fn post_clone_setup(
         branch,
         initial_commit,
         created_at: chrono::Utc::now(),
+        symlinked_dirs,
+        linked_dirs,
+        is_worktree: false,
     };
     state.add(entry.clone());
     state.save()?;
@@ -246,7 +406,7 @@ fn rollback_clone(source: &Path, dest: &Path, vcs: &Vcs) {
     if dest.exists() {
         if let Err(e) = std::fs::remove_dir_all(dest) {
             eprintln!(
-                "cow: warning — could not remove partial workspace at '{}': {}",
+                "cow: warning — could not remove partial pasture at '{}': {}",
                 dest.display(),
                 e
             );
@@ -262,7 +422,7 @@ fn rollback_clone(source: &Path, dest: &Path, vcs: &Vcs) {
 ///
 /// For jj workspaces the file is `.jj/cow-context`. jj does not scan inside
 /// `.jj/` for working-copy changes, so the file is invisible to `jj diff`.
-fn write_context_file(entry: &WorkspaceEntry) -> Result<()> {
+fn write_context_file(entry: &PastureEntry) -> Result<()> {
     let ctx = serde_json::json!({
         "name": entry.name,
         "source": entry.source.to_string_lossy(),
@@ -281,45 +441,153 @@ fn write_context_file(entry: &WorkspaceEntry) -> Result<()> {
         return Ok(());
     }
 
-    // Git: write to root and exclude from git tracking.
+    // Git: write .cow-context and agent orientation files, then exclude all
+    // of them so they never appear as untracked.
     let ctx_path = entry.path.join(".cow-context");
     std::fs::write(&ctx_path, ctx_content)
         .with_context(|| format!("Failed to write .cow-context to {}", ctx_path.display()))?;
 
+    // For scoped names (project/branch) write agent files one level up, into
+    // the scope directory (~/.cow/pastures/project/). That directory is just a
+    // container — it has no cloned content — so there is nothing to clobber.
+    // For unscoped names the workspace IS the scope directory, so write there
+    // but skip any file that already exists (could be the project's own).
+    let agent_dir = if entry.name.contains('/') {
+        entry.path.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| entry.path.clone())
+    } else {
+        entry.path.clone()
+    };
+
+    let claude_md_paths = collect_claude_md_paths(&entry.source);
+    let agents_md = build_agents_md(&claude_md_paths, &entry.source);
+    let redirect = "See [AGENTS.md](./AGENTS.md) for pasture context and project instructions.\n";
+    for (name, content) in &[
+        ("AGENTS.md", agents_md.as_str()),
+        ("CLAUDE.md", redirect),
+        ("GEMINI.md", redirect),
+    ] {
+        let path = agent_dir.join(name);
+        if !path.exists() {
+            std::fs::write(&path, content)
+                .with_context(|| format!("Failed to write {}", path.display()))?;
+        }
+    }
+
+    // Update .git/info/exclude in the workspace. Agent files in the scope
+    // directory are outside the git repo and need no exclusion; files written
+    // directly into the workspace (unscoped case) do.
     let exclude_path = entry.path.join(".git").join("info").join("exclude");
     if let Ok(existing) = std::fs::read_to_string(&exclude_path) {
-        if !existing.contains(".cow-context") {
-            let mut content = existing;
-            if !content.ends_with('\n') {
+        let mut content = existing;
+        let names: &[&str] = if entry.name.contains('/') {
+            &[".cow-context"]
+        } else {
+            &[".cow-context", "AGENTS.md", "CLAUDE.md", "GEMINI.md"]
+        };
+        for name in names {
+            if !content.contains(name) {
+                if !content.ends_with('\n') {
+                    content.push('\n');
+                }
+                content.push_str(name);
                 content.push('\n');
             }
-            content.push_str(".cow-context\n");
-            std::fs::write(&exclude_path, content)
-                .with_context(|| format!("Failed to update {}", exclude_path.display()))?;
         }
+        std::fs::write(&exclude_path, &content)
+            .with_context(|| format!("Failed to update {}", exclude_path.display()))?;
     }
 
     Ok(())
 }
 
+/// Walk from `source` up to the filesystem root and collect paths of any
+/// `CLAUDE.md` files found, ordered from root (most general) to source
+/// (most specific).
+fn collect_claude_md_paths(source: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut dir = source.to_path_buf();
+    loop {
+        let candidate = dir.join("CLAUDE.md");
+        if candidate.exists() {
+            paths.push(candidate);
+        }
+        match dir.parent() {
+            Some(parent) if parent != dir => dir = parent.to_path_buf(),
+            _ => break,
+        }
+    }
+    paths.reverse();
+    paths
+}
+
+/// Build the content of the `AGENTS.md` orientation file.
+///
+/// Written once to the scope directory and shared by all workspaces for the
+/// same project, so it contains only project-level information (no per-branch
+/// or per-commit details — those live in each workspace's `.cow-context`).
+fn build_agents_md(claude_md_paths: &[PathBuf], source: &Path) -> String {
+    let instructions_block = if claude_md_paths.is_empty() {
+        String::from("*(No CLAUDE.md files found in the source hierarchy.)*\n")
+    } else {
+        claude_md_paths
+            .iter()
+            .map(|p| format!("- {}\n", p.display()))
+            .collect()
+    };
+
+    format!(
+        "# Cow Pastures\n\
+         \n\
+         This directory contains [cow](https://github.com/joeinnes/cow) \
+         pastures cloned from:\n\
+         \n\
+         `{source}`\n\
+         \n\
+         Each subdirectory is a pasture — an independent copy-on-write clone. \
+         See `.cow-context` inside each one for its name, branch, and initial commit SHA.\n\
+         \n\
+         ## Project instructions\n\
+         \n\
+         Read the following files for project-level conventions and tooling guidance \
+         (most general to most specific):\n\
+         \n\
+         {instructions}\n\
+         ## Cow commands\n\
+         \n\
+         Run from inside any pasture:\n\
+         \n\
+         - `cow status` — pasture status and diff summary\n\
+         - `cow sync` — rebase onto the latest source branch\n\
+         - `cow extract --patch <file>` — export changes as a patch\n\
+         - `cow extract --branch <name>` — push changes as a branch to origin\n\
+         - `cow remove <name>` — delete a pasture\n\
+         - `cow list` — list all pastures\n\
+         ",
+        source = source.display(),
+        instructions = instructions_block,
+    )
+}
+
 fn validate_name(name: &str) -> Result<()> {
     if name.is_empty() {
-        bail!("Workspace name cannot be empty.");
+        bail!("Pasture name cannot be empty.");
     }
     if name.contains('\0') {
-        bail!("Workspace name '{}' contains invalid characters.", name);
+        bail!("Pasture name '{}' contains invalid characters.", name);
     }
     if name.starts_with('/') || name.ends_with('/') {
-        bail!("Workspace name '{}' contains invalid characters.", name);
+        bail!("Pasture name '{}' contains invalid characters.", name);
     }
     // At most one '/' — more than one means multiple path components.
     if name.chars().filter(|&c| c == '/').count() > 1 {
-        bail!("Workspace name '{}' contains invalid characters.", name);
+        bail!("Pasture name '{}' contains invalid characters.", name);
     }
     // Neither part may be '.' or '..'.
     for part in name.split('/') {
         if part == "." || part == ".." {
-            bail!("Workspace name '{}' is not allowed.", name);
+            bail!("Pasture name '{}' is not allowed.", name);
         }
     }
     Ok(())
@@ -416,15 +684,26 @@ fn jj_cow_clone(source: &Path, dest: &Path) -> Result<()> {
 }
 // tarpaulin-ignore-end
 
-fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
+fn cow_clone(
+    source: &Path,
+    dest: &Path,
+    vcs: &Vcs,
+    whole_candidates: &[(PathBuf, usize)],
+    dep_candidates: &[(PathBuf, usize)],
+) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         if *vcs == Vcs::Jj {
             return jj_cow_clone(source, dest);
         }
-        // macOS: clonefile(2) atomically clones the entire directory tree.
-        // This is a single kernel call — O(1) on APFS, no per-file traversal.
-        return clonefile_dir(source, dest);
+        if whole_candidates.is_empty() && dep_candidates.is_empty() {
+            // Fast path: single clonefile(2) syscall, O(1) on APFS.
+            return clonefile_dir(source, dest);
+        }
+        // Selective clone: per-package for dep dirs, whole-dir for others, clonefile the rest.
+        let whole_paths: Vec<PathBuf> = whole_candidates.iter().map(|(p, _)| p.clone()).collect();
+        let dep_paths: Vec<PathBuf> = dep_candidates.iter().map(|(p, _)| p.clone()).collect();
+        return selective_clone(source, source, dest, &whole_paths, &dep_paths);
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -462,6 +741,181 @@ fn cow_clone(source: &Path, dest: &Path, vcs: &Vcs) -> Result<()> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Symlink candidate detection
+// ---------------------------------------------------------------------------
+
+/// Walk `dir` recursively (post-order). Returns the total entry count for
+/// `dir`'s subtree. For each subdirectory that exceeds `threshold` and has no
+/// large descendant already identified, records it as a symlink candidate.
+fn collect_candidates(
+    root: &Path,
+    dir: &Path,
+    threshold: usize,
+    candidates: &mut Vec<(PathBuf, usize)>,
+) -> Result<usize> {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return Ok(0),
+    };
+    let mut total: usize = 0;
+    for entry in rd.flatten() {
+        // Never descend into or count VCS metadata — symlinking .git/.jj would break things.
+        let name = entry.file_name();
+        if matches!(name.to_string_lossy().as_ref(), ".git" | ".jj") {
+            continue;
+        }
+        total += 1;
+        if let Ok(ft) = entry.file_type() {
+            if ft.is_dir() {
+                let path = entry.path();
+                let before = candidates.len();
+                let sub = collect_candidates(root, &path, threshold, candidates)?;
+                total = total.saturating_add(sub);
+                // If no deeper candidate was found inside this subdir and the
+                // subdir itself is large, it is the deepest large directory.
+                if candidates.len() == before && sub > threshold {
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        candidates.push((rel.to_path_buf(), sub));
+                    }
+                }
+            }
+        }
+    }
+    Ok(total)
+}
+
+/// Find the minimal set of large directories in `source`. Returns each as
+/// (relative path, total entry count). "Minimal" means we prefer deeper dirs
+/// — e.g. `homepage/node_modules/` over `homepage/` itself.
+fn find_symlink_candidates(source: &Path, threshold: usize) -> Result<Vec<(PathBuf, usize)>> {
+    let mut candidates = Vec::new();
+    collect_candidates(source, source, threshold, &mut candidates)?;
+    Ok(candidates)
+}
+
+/// Read `pre_clone.symlink_threshold` from `.cow.json` in `source`, if present.
+fn read_symlink_threshold(source: &Path) -> Option<usize> {
+    #[derive(serde::Deserialize)]
+    struct CowConfig { pre_clone: Option<PreClone> }
+    #[derive(serde::Deserialize)]
+    struct PreClone { symlink_threshold: Option<usize> }
+    let content = std::fs::read_to_string(source.join(".cow.json")).ok()?;
+    let cfg: CowConfig = serde_json::from_str(&content).ok()?;
+    cfg.pre_clone?.symlink_threshold
+}
+
+/// Format a count with comma separators, e.g. 382760 → "382,760".
+fn format_count(n: usize) -> String {
+    let s = n.to_string();
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(c);
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Selective clone (macOS — replaces the single clonefile(2) call when
+// large dirs are present)
+// ---------------------------------------------------------------------------
+
+/// Clone `source` into `dest`:
+/// - whole-dir symlink for entries in `whole_candidates`
+/// - per-package symlinks (real dir, each top-level entry symlinked) for entries in `dep_candidates`
+/// - recurse into dirs that contain any candidate descendant
+/// - clonefile everything else
+#[cfg(target_os = "macos")]
+fn selective_clone(
+    orig_source: &Path,
+    source: &Path,
+    dest: &Path,
+    whole_candidates: &[PathBuf],
+    dep_candidates: &[PathBuf],
+) -> Result<()> {
+    std::fs::create_dir_all(dest)
+        .with_context(|| format!("Failed to create directory: {}", dest.display()))?;
+
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("Failed to read directory: {}", source.display()))?
+    {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dest.join(entry.file_name());
+        let rel = src_path
+            .strip_prefix(orig_source)
+            .expect("source is always under orig_source");
+        let rel_buf = rel.to_path_buf();
+
+        if whole_candidates.contains(&rel_buf) {
+            // Whole-dir symlink (plain large dir — writes affect source).
+            std::os::unix::fs::symlink(&src_path, &dst_path)
+                .with_context(|| format!("Failed to symlink '{}'", src_path.display()))?;
+        } else if dep_candidates.contains(&rel_buf) {
+            // Per-package symlinks: create a real dir, symlink each top-level entry.
+            std::fs::create_dir_all(&dst_path)
+                .with_context(|| format!("Failed to create dir '{}'", dst_path.display()))?;
+            for child in std::fs::read_dir(&src_path)
+                .with_context(|| format!("Failed to read dep dir '{}'", src_path.display()))?
+            {
+                let child = child?;
+                std::os::unix::fs::symlink(child.path(), dst_path.join(child.file_name()))
+                    .with_context(|| format!("Failed to symlink package '{}'", child.path().display()))?;
+            }
+        } else if entry.file_type()?.is_dir()
+            && (whole_candidates.iter().any(|c| c.starts_with(rel) && c != rel)
+                || dep_candidates.iter().any(|c| c.starts_with(rel) && c != rel))
+        {
+            // Has a candidate descendant — recurse.
+            selective_clone(orig_source, &src_path, &dst_path, whole_candidates, dep_candidates)?;
+        } else {
+            clonefile_dir(&src_path, &dst_path)
+                .with_context(|| format!("Failed to clone '{}'", src_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns true if the last component of `rel` is a known dependency directory name.
+fn is_dep_dir(rel: &Path) -> bool {
+    rel.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| DEP_DIR_NAMES.contains(&n))
+        .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// Git worktree helpers (used by run_worktree)
+// ---------------------------------------------------------------------------
+
+/// Returns true if `branch` exists in `source` repo (local branch).
+fn git_branch_exists(source: &Path, branch: &str) -> bool {
+    Command::new("git")
+        .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch)])
+        .current_dir(source)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Returns true if `branch` is currently checked out in any worktree of `source`.
+fn git_branch_in_worktree(source: &Path, branch: &str) -> bool {
+    let Ok(output) = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(source)
+        .output()
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let target = format!("branch refs/heads/{}", branch);
+    text.lines().any(|line| line == target)
+}
+
 fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
     // Remove stale worktree refs inherited from the CoW clone. The source repo
     // may have had linked worktrees whose absolute paths are baked into
@@ -493,7 +947,7 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
             .status()
             .context("Failed to run git checkout -b")?;
         if !status.success() {
-            bail!("Failed to check out branch '{}' in workspace.", branch);
+            bail!("Failed to check out branch '{}' in pasture.", branch);
         }
     }
 
@@ -541,7 +995,7 @@ fn setup_jj(workspace: &Path, change: Option<&str>, from: Option<&str>, message:
             .status()
             .context("Failed to run jj describe")?;
         if !status.success() {
-            bail!("Failed to set initial change description in workspace.");
+            bail!("Failed to set initial change description in pasture.");
         }
     }
 
@@ -744,6 +1198,8 @@ mod tests {
             from: None,
             message: None,
             print_path: false,
+            no_symlink: true,
+            worktree: false,
         };
         let err = run(args).unwrap_err();
         assert!(

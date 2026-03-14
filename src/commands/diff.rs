@@ -11,7 +11,7 @@ pub fn run(args: DiffArgs) -> Result<()> {
     let entry = state
         .get(&name)
         .cloned()
-        .with_context(|| format!("Workspace '{}' not found.", name))?;
+        .with_context(|| format!("Pasture '{}' not found.", name))?;
 
     let status = match entry.vcs {
         Vcs::Git => std::process::Command::new("git")
@@ -42,7 +42,7 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
     let cwd = std::env::current_dir().context("Cannot determine current directory")?;
     let cwd = cwd.canonicalize().unwrap_or(cwd);
     state
-        .workspaces
+        .pastures
         .iter()
         .find(|w| {
             let wp = w.path.canonicalize().unwrap_or_else(|_| w.path.clone());
@@ -50,6 +50,6 @@ fn resolve_name(name: Option<String>, state: &State) -> Result<String> {
         })
         .map(|w| w.name.clone())
         .context(
-            "Not in a cow workspace. Specify a workspace name or run from inside a workspace.",
+            "Not in a cow pasture. Specify a pasture name or run from inside a pasture.",
         )
 }
