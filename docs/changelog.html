@@ -342,6 +342,58 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.6 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.6</span>
+          <span class="release-date">2026-03-05</span>
+          <span class="release-tag fix">bug fix</span>
+        </div>
+        <div class="release-body">
+          <h2>Fix silent hang in cow run, alphabetical list, better tab completion.</h2>
+          <p class="lead">
+            Patch release fixing a critical bug where <code>cow run</code> would hang
+            silently for any non-install subcommand, plus two quality-of-life improvements.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">Bug fixes</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag fix">fix</span>
+                <code>cow run</code> — PM shims recursed infinitely when called with
+                non-install subcommands (e.g. <code>pnpm run dev</code>, <code>npm test</code>).
+                The shim used <code>/usr/bin/env &lt;pm&gt;</code> to find the real binary, but
+                since <code>~/.cow/shims/</code> is prepended to PATH the shim found itself
+                and looped. Fixed by stripping the shims directory from PATH at the top of
+                every shim before invoking the real binary. Existing stale shims are
+                automatically regenerated on the next <code>cow run</code> invocation.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Improvements</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag improved">improved</span>
+                <code>cow list</code> output is now sorted alphabetically by name, grouping
+                pastures by project naturally (e.g. all <code>jazz2/</code> entries together).
+              </li>
+              <li>
+                <span class="tag improved">improved</span>
+                <code>cow install</code> now sets up full tab completion for the <code>cow</code>
+                binary itself: subcommand completion at position 1, pasture name completion at
+                position 2 for all name-taking commands (<code>run</code>, <code>status</code>,
+                <code>diff</code>, <code>remove</code>, <code>cd</code>, <code>materialise</code>,
+                <code>fetch-from</code>, <code>recreate</code>). Users with the old snippet are
+                prompted to remove it and re-run <code>cow install</code>.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.5 -->
       <div class="release">
         <div class="release-meta">

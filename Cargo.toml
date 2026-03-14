@@ -1,6 +1,6 @@
 [package]
 name = "cow-cli"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Copy-on-write workspace manager for parallel development"
 authors = ["Joe Innes"]

@@ -117,6 +117,10 @@ fn shim_content(pm: &str) -> Option<&'static str> {
     match pm {
         "npm" => Some(
             "#!/bin/sh\n\
+             # Strip the shims dir from PATH to prevent the shim calling itself.\n\
+             _d=$(dirname \"$0\")\n\
+             PATH=$(printf '%s' \"$PATH\" | sed \"s|${_d}:||g\" | sed \"s|:${_d}||g\")\n\
+             export PATH\n\
              case \"$1\" in\n\
              \x20 install|i|add|remove|uninstall|rm|r|ci)\n\
              \x20   exec /usr/bin/env npm --prefix \"$COW_PASTURE_PATH\" \"$@\"\n\
@@ -128,6 +132,10 @@ fn shim_content(pm: &str) -> Option<&'static str> {
         ),
         "pnpm" => Some(
             "#!/bin/sh\n\
+             # Strip the shims dir from PATH to prevent the shim calling itself.\n\
+             _d=$(dirname \"$0\")\n\
+             PATH=$(printf '%s' \"$PATH\" | sed \"s|${_d}:||g\" | sed \"s|:${_d}||g\")\n\
+             export PATH\n\
              case \"$1\" in\n\
              \x20 install|i|add|remove|rm|uninstall|up|update|prune)\n\
              \x20   exec /usr/bin/env pnpm --dir \"$COW_PASTURE_PATH\" \"$@\"\n\
@@ -139,6 +147,10 @@ fn shim_content(pm: &str) -> Option<&'static str> {
         ),
         "yarn" => Some(
             "#!/bin/sh\n\
+             # Strip the shims dir from PATH to prevent the shim calling itself.\n\
+             _d=$(dirname \"$0\")\n\
+             PATH=$(printf '%s' \"$PATH\" | sed \"s|${_d}:||g\" | sed \"s|:${_d}||g\")\n\
+             export PATH\n\
              # Yarn v1: redirect install subcommands with --modules-folder.\n\
              # Yarn Berry (v2+): installs to cwd/node_modules natively — pass through.\n\
              if [ -f \".yarnrc.yml\" ]; then\n\
@@ -155,6 +167,10 @@ fn shim_content(pm: &str) -> Option<&'static str> {
         ),
         "bun" => Some(
             "#!/bin/sh\n\
+             # Strip the shims dir from PATH to prevent the shim calling itself.\n\
+             _d=$(dirname \"$0\")\n\
+             PATH=$(printf '%s' \"$PATH\" | sed \"s|${_d}:||g\" | sed \"s|:${_d}||g\")\n\
+             export PATH\n\
              # bun uses the nearest package.json directory (cwd = pasture) — pass through.\n\
              exec /usr/bin/env bun \"$@\"\n",
         ),
