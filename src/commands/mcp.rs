@@ -336,11 +336,11 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
         "cow_sync" => {
             let mut cmd = std::process::Command::new(&exe);
             cmd.arg("sync");
-            if let Some(b) = args["source_branch"].as_str() {
-                cmd.arg(b);
-            }
             if let Some(n) = args["name"].as_str() {
-                cmd.args(["--name", n]);
+                cmd.arg(n);
+            }
+            if let Some(b) = args["source_branch"].as_str() {
+                cmd.args(["--source-branch", b]);
             }
             if args["merge"].as_bool().unwrap_or(false) {
                 cmd.arg("--merge");

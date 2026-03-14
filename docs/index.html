@@ -495,12 +495,101 @@
     .footer-links a:hover { color: var(--ink); }
 
     /* ─── Responsive ─────────────────────────────────────── */
+    .proof-strip {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0;
+      margin-top: 40px;
+      padding: 24px 32px;
+      background: rgba(58,107,53,.06);
+      border: 1px solid rgba(58,107,53,.18);
+      border-radius: 12px;
+      flex-wrap: wrap;
+      max-width: 760px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .proof-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 0 28px;
+    }
+    .proof-num {
+      font-size: 1.9rem;
+      font-weight: 900;
+      color: var(--green);
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1;
+    }
+    .proof-label {
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+    .proof-sep {
+      width: 1px;
+      height: 36px;
+      background: var(--border-light);
+      flex-shrink: 0;
+    }
+    .proof-savings {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 0 28px;
+    }
+    .proof-savings-label {
+      font-size: 0.74rem;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+    .proof-pm-row {
+      display: flex;
+      gap: 20px;
+    }
+    .proof-pm {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+    .proof-pm-num {
+      font-size: 1.4rem;
+      font-weight: 900;
+      color: var(--green);
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1;
+    }
+    .proof-pm-name {
+      font-size: 0.68rem;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+    .proof-caption {
+      font-size: 0.73rem;
+      color: var(--ink-soft);
+      font-style: italic;
+      margin-top: 10px;
+      text-align: center;
+    }
     @media (max-width: 700px) {
       section { padding: 56px 0; }
       .nav-links { display: none; }
       .hero-cow  { font-size: 4rem; }
       .mcp-grid, .install-grid { grid-template-columns: 1fr; }
       .cow-diagram { font-size: 0.68rem; }
+      .proof-strip { flex-direction: column; gap: 20px; padding: 20px 24px; }
+      .proof-sep { width: 40px; height: 1px; }
     }
     @media (max-width: 440px) {
       h1 { font-size: 2.1rem; }
@@ -587,6 +676,33 @@
         <span class="pill">🤖 AI-agent ready</span>
         <span class="pill">🆓 MIT licence</span>
       </div>
+
+      <div class="proof-strip">
+        <div class="proof-stat">
+          <span class="proof-num">18</span>
+          <span class="proof-label">active pastures</span>
+        </div>
+        <div class="proof-sep"></div>
+        <div class="proof-stat">
+          <span class="proof-num">4 MB</span>
+          <span class="proof-label">total disk delta</span>
+        </div>
+        <div class="proof-sep"></div>
+        <div class="proof-savings">
+          <span class="proof-savings-label">saved vs. full clones</span>
+          <div class="proof-pm-row">
+            <div class="proof-pm">
+              <span class="proof-pm-num">~123 GB</span>
+              <span class="proof-pm-name">npm / yarn</span>
+            </div>
+            <div class="proof-pm">
+              <span class="proof-pm-num">~86 GB</span>
+              <span class="proof-pm-name">pnpm / bun</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="proof-caption">the developer's own experience — 18 pastures across several JS monorepos. your mileage will vary.</p>
     </div>
   </section>
 
@@ -744,9 +860,9 @@
   <section id="demo">
     <div class="container">
       <span class="section-label">cli reference</span>
-      <h2>Six commands. Deliberately minimal.</h2>
+      <h2>Eighteen commands. One binary.</h2>
       <p class="section-intro">
-        Deliberately minimal. No config files to maintain, no daemons to manage, no subscriptions.
+        No daemons to manage, no subscriptions, no install step in your pastures.
       </p>
 
       <div class="terminal">

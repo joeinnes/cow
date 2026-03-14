@@ -166,7 +166,7 @@ fn offer_push(name: &str, path: &Path) -> Result<bool> {
 /// For regular clones (including those with symlinked dirs), uses
 /// `remove_dir_all` — symlinks are removed, not followed, so the source
 /// repo's files are untouched.
-fn remove_pasture_dir(entry: &PastureEntry, force: bool) -> Result<()> {
+pub(crate) fn remove_pasture_dir(entry: &PastureEntry, force: bool) -> Result<()> {
     if entry.is_worktree {
         // Remove cow-internal files before calling git worktree remove.
         // git treats any untracked file (including .cow-context, which is

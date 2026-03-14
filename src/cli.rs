@@ -28,6 +28,8 @@ pub enum Commands {
     Extract(ExtractArgs),
     /// Print the path of a pasture (for shell cd integration)
     Cd(CdArgs),
+    /// Print the absolute path of a pasture
+    Path(CdArgs),
     /// Sync a pasture with its source repository
     Sync(SyncArgs),
     /// Migrate existing git worktrees, jj workspaces, or orphaned directories to cow pastures
@@ -44,6 +46,10 @@ pub enum Commands {
     Install,
     /// Run as a Model Context Protocol (MCP) stdio server
     Mcp,
+    /// Show estimated disk savings across all pastures
+    Stats,
+    /// Remove pastures whose branches have been pushed or merged to origin
+    Gc(GcArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -108,6 +114,10 @@ pub struct ListArgs {
     /// Output as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Show the absolute path of each pasture
+    #[arg(long)]
+    pub paths: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -156,12 +166,12 @@ pub struct CdArgs {
 
 #[derive(clap::Args, Debug)]
 pub struct SyncArgs {
-    /// Branch in the source repo to sync from (defaults to pasture's current branch)
-    pub source_branch: Option<String>,
-
     /// Pasture name (defaults to current directory)
-    #[arg(long, short = 'n')]
     pub name: Option<String>,
+
+    /// Branch in the source repo to sync from (defaults to pasture's current branch)
+    #[arg(long)]
+    pub source_branch: Option<String>,
 
     /// Merge instead of rebase
     #[arg(long)]
@@ -229,6 +239,29 @@ pub struct ExtractArgs {
 pub struct MaterialiseArgs {
     /// Pasture name
     pub name: String,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct GcArgs {
+    /// Only remove pastures whose branch has been merged into the default branch
+    #[arg(long)]
+    pub merged: bool,
+
+    /// Show what would be removed without removing anything
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// Skip confirmation prompts
+    #[arg(long, short = 'y')]
+    pub yes: bool,
+
+    /// Skip dirty-state warnings and remove immediately
+    #[arg(long)]
+    pub force: bool,
+
+    /// Fetch from origin before checking (updates remote-tracking refs)
+    #[arg(long)]
+    pub fetch: bool,
 }
 
 #[derive(clap::Args, Debug)]

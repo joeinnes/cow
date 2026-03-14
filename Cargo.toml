@@ -1,6 +1,6 @@
 [package]
 name = "cow-cli"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 description = "Copy-on-write workspace manager for parallel development"
 authors = ["Joe Innes"]
@@ -23,6 +23,7 @@ dialoguer = "0.11"
 dirs = "5"
 glob = "0.3"
 libc = "0.2"
+rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
