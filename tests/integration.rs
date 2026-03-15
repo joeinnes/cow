@@ -2699,6 +2699,54 @@ mod tests {
     }
 
     #[test]
+    fn remove_jj_cleans_up_workspace_record() {
+        let env = Env::new();
+        let source = make_jj_repo(&env.home);
+
+        env.cow()
+            .args(["create", "jj-cleanup", "--source", source.path().to_str().unwrap()])
+            .assert()
+            .success();
+
+        // Verify the workspace was registered with jj before removal.
+        let before = std::process::Command::new("jj")
+            .args(["workspace", "list"])
+            .current_dir(source.path())
+            .env("HOME", &env.home)
+            .output()
+            .expect("failed to run jj workspace list");
+        let before_stdout = String::from_utf8_lossy(&before.stdout);
+        assert!(
+            before_stdout.contains("jj-cleanup"),
+            "expected jj workspace list to contain 'jj-cleanup' before removal, got: {}",
+            before_stdout
+        );
+
+        // Remove the pasture.
+        env.cow()
+            .args(["remove", "--force", &scoped(&source, "jj-cleanup")])
+            .assert()
+            .success();
+
+        // The pasture directory should be gone.
+        assert!(!ws_path(&env.home, &source, "jj-cleanup").exists());
+
+        // jj workspace list in the source repo should no longer mention the pasture.
+        let after = std::process::Command::new("jj")
+            .args(["workspace", "list"])
+            .current_dir(source.path())
+            .env("HOME", &env.home)
+            .output()
+            .expect("failed to run jj workspace list");
+        let after_stdout = String::from_utf8_lossy(&after.stdout);
+        assert!(
+            !after_stdout.contains("jj-cleanup"),
+            "expected jj workspace list to NOT contain 'jj-cleanup' after removal, got: {}",
+            after_stdout
+        );
+    }
+
+    #[test]
     fn remove_jj_dirty_note() {
         let env = Env::new();
         let source = make_jj_repo(&env.home);
