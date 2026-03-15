@@ -4088,6 +4088,38 @@ mod tests {
     }
 
     #[test]
+    fn create_turbopack_monorepo_skips_symlinks() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Enough files to trigger symlink detection
+        let nm = src.join("node_modules");
+        std::fs::create_dir_all(&nm).unwrap();
+        for i in 0..5 { std::fs::write(nm.join(format!("f{}.js", i)), "x").unwrap(); }
+        std::fs::write(src.join(".cow.json"), r#"{"pre_clone":{"symlink_threshold":3}}"#).unwrap();
+
+        // turbo.json marks this as a Turbopack monorepo
+        std::fs::write(src.join("turbo.json"), r#"{"pipeline":{}}"#).unwrap();
+
+        let out = env.cow()
+            .args(["create", "test", "--source", src.to_str().unwrap(), "--no-branch"])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let stdout = String::from_utf8_lossy(&out);
+
+        assert!(stdout.contains("Turbopack"), "should warn about Turbopack monorepo");
+        assert!(!is_symlink(&src.join("node_modules").canonicalize().unwrap()),
+            "source node_modules should not be a symlink");
+
+        let pasture = ws_path(&env.home, &source, "test");
+        assert!(!is_symlink(&pasture.join("node_modules")), "node_modules should be a full clone, not a symlink");
+    }
+
+    #[test]
     fn create_no_symlink_skips_detection() {
         let env = Env::new();
         let source = make_git_repo();
@@ -5192,6 +5224,159 @@ mod tests {
             .assert()
             .success()
             .stdout(predicate::str::contains("No candidates found"));
+    }
+
+    // ─── recreate + worktree ─────────────────────────────────────────────────
+
+    #[test]
+    fn recreate_worktree_cleans_up_source_worktree_refs() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Create a worktree pasture
+        env.cow()
+            .args(["create", "wt-recreate", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "wt-recreate");
+        assert!(pasture.exists());
+
+        // Confirm the worktree is registered with git
+        let out = std::process::Command::new("git")
+            .args(["worktree", "list"])
+            .current_dir(src)
+            .output()
+            .unwrap();
+        let list_before = String::from_utf8_lossy(&out.stdout).to_string();
+        assert!(list_before.contains(pasture.to_str().unwrap()), "worktree should be registered before recreate");
+
+        // Recreate the pasture
+        env.cow()
+            .args(["recreate", &scoped(&source, "wt-recreate")])
+            .assert()
+            .success();
+
+        // After recreate, `git worktree list` on the source should show
+        // exactly ONE worktree entry for the pasture path (the freshly
+        // recreated worktree). With the bug, remove_dir_all leaves a stale
+        // back-link in .git/worktrees/, so we'd see TWO entries (stale + new)
+        // or the recreate silently converts to a CoW clone and there's a stale
+        // entry with no valid counterpart.
+        let out = std::process::Command::new("git")
+            .args(["worktree", "list", "--porcelain"])
+            .current_dir(src)
+            .output()
+            .unwrap();
+        let wt_list = String::from_utf8_lossy(&out.stdout).to_string();
+        let pasture_str = pasture.to_str().unwrap();
+        let worktree_refs: Vec<&str> = wt_list
+            .lines()
+            .filter(|line| line.starts_with("worktree ") && line.contains(pasture_str))
+            .collect();
+        assert_eq!(
+            worktree_refs.len(),
+            1,
+            "source should have exactly one worktree ref for the pasture after recreate \
+             (the freshly created one), but found: {:?}",
+            worktree_refs
+        );
+    }
+
+    #[test]
+    fn recreate_worktree_preserves_worktree_mode() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Create a worktree pasture
+        env.cow()
+            .args(["create", "wt-mode", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "wt-mode");
+
+        // Confirm it is a worktree (`.git` is a file)
+        assert!(pasture.join(".git").is_file(), ".git should be a file before recreate");
+
+        let state = read_state(&env.home);
+        assert_eq!(
+            state["pastures"][0]["is_worktree"],
+            serde_json::Value::Bool(true),
+            "should be a worktree before recreate"
+        );
+
+        // Recreate the pasture
+        env.cow()
+            .args(["recreate", &scoped(&source, "wt-mode")])
+            .assert()
+            .success();
+
+        // After recreate, the pasture should still be a worktree
+        let pasture_after = ws_path(&env.home, &source, "wt-mode");
+        assert!(
+            pasture_after.join(".git").is_file(),
+            ".git should still be a file (worktree) after recreate, not a directory (CoW clone)"
+        );
+
+        let state_after = read_state(&env.home);
+        assert_eq!(
+            state_after["pastures"][0]["is_worktree"],
+            serde_json::Value::Bool(true),
+            "is_worktree should remain true after recreate"
+        );
+    }
+
+    #[test]
+    fn recreate_worktree_pasture_is_functional() {
+        let env = Env::new();
+        let source = make_git_repo();
+        let src = source.path();
+
+        // Create a worktree pasture
+        env.cow()
+            .args(["create", "wt-func", "--source", src.to_str().unwrap(), "--worktree"])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "wt-func");
+        assert!(pasture.exists());
+
+        // Recreate the pasture
+        env.cow()
+            .args(["recreate", &scoped(&source, "wt-func")])
+            .assert()
+            .success();
+
+        // Pasture should exist and contain the source files
+        assert!(pasture.exists(), "pasture should exist after recreate");
+        assert!(pasture.join("hello.txt").exists(), "source files should be present");
+
+        // Should be a valid git repo — `git status` should succeed
+        let status_out = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&pasture)
+            .output()
+            .unwrap();
+        assert!(status_out.status.success(), "pasture should be a valid git repo after recreate");
+
+        // Since the original was a worktree, the recreated pasture should
+        // also be a functional linked worktree: .git is a file pointing back
+        // to the source's .git/worktrees/ directory.
+        assert!(
+            pasture.join(".git").is_file(),
+            "recreated worktree pasture should have .git as a file (linked worktree), \
+             not a directory (CoW clone)"
+        );
+
+        // Should appear in cow list
+        env.cow()
+            .args(["list"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("wt-func"));
     }
 
 }
