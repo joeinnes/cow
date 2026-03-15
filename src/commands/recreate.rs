@@ -36,7 +36,7 @@ pub fn run(args: RecreateArgs) -> Result<()> {
 
     // Remove the existing workspace directory.
     if entry.path.exists() {
-        super::remove::remove_pasture_dir(&entry, false)?;
+        super::remove::remove_pasture_dir(&entry, true)?;
     }
     state.remove(&args.name);
     state.save()?;
