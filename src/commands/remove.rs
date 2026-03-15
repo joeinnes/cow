@@ -191,6 +191,16 @@ pub(crate) fn remove_pasture_dir(entry: &PastureEntry, force: bool) -> Result<()
             );
         }
     } else {
+        // For jj pastures, forget the workspace in the source repo before
+        // deleting the directory. Best-effort — source may be gone already.
+        if entry.vcs == Vcs::Jj {
+            if let Some(ws_name) = entry.path.file_name().and_then(|n| n.to_str()) {
+                let _ = std::process::Command::new("jj")
+                    .args(["workspace", "forget", ws_name])
+                    .current_dir(&entry.source)
+                    .status();
+            }
+        }
         std::fs::remove_dir_all(&entry.path)
             .with_context(|| format!("Failed to remove '{}'", entry.path.display()))?;
     }
