@@ -49,7 +49,15 @@ pub fn run(args: RemoveArgs) -> Result<()> {
 
         // tarpaulin-ignore-start
         if !entry.path.exists() {
-            // Already gone; just prune from state
+            // Already gone on disk; still need to clean up VCS workspace records.
+            if entry.vcs == Vcs::Jj {
+                if let Some(ws_name) = entry.path.file_name().and_then(|n| n.to_str()) {
+                    let _ = std::process::Command::new("jj")
+                        .args(["workspace", "forget", ws_name])
+                        .current_dir(&entry.source)
+                        .status();
+                }
+            }
             state.remove(name);
             continue;
         }
