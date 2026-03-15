@@ -36,8 +36,7 @@ pub fn run(args: RecreateArgs) -> Result<()> {
 
     // Remove the existing workspace directory.
     if entry.path.exists() {
-        std::fs::remove_dir_all(&entry.path)
-            .with_context(|| format!("Failed to remove '{}'", entry.path.display()))?;
+        super::remove::remove_pasture_dir(&entry, false)?;
     }
     state.remove(&args.name);
     state.save()?;
@@ -64,6 +63,6 @@ pub fn run(args: RecreateArgs) -> Result<()> {
         message: None,
         print_path: false,
         no_symlink: false,
-        worktree: false,
+        worktree: entry.is_worktree,
     })
 }
