@@ -150,7 +150,13 @@ fn truncate_name(s: &str, max: usize) -> String {
     } else {
         let ellipsis = "…";
         let cut = max.saturating_sub(ellipsis.len());
-        format!("{}{}", &s[..cut], ellipsis)
+        // Find the last char boundary that fits within `cut` bytes.
+        let end = s.char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= cut)
+            .last()
+            .unwrap_or(0);
+        format!("{}{}", &s[..end], ellipsis)
     }
 }
 
