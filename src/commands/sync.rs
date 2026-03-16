@@ -152,7 +152,23 @@ pub fn run(args: SyncArgs) -> Result<()> {
         }
 
         // For rebase, detect whether we're in a conflict state and auto-abort.
-        let rebase_dir = entry.path.join(".git").join("rebase-merge");
+        // Resolve the real gitdir — for linked worktrees, .git is a file
+        // pointing to e.g. <source>/.git/worktrees/<name>/
+        let rebase_dir = {
+            let gitdir = std::process::Command::new("git")
+                .args(["rev-parse", "--git-dir"])
+                .current_dir(&entry.path)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| {
+                    let raw = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    let p = std::path::PathBuf::from(&raw);
+                    if p.is_absolute() { p } else { entry.path.join(p) }
+                })
+                .unwrap_or_else(|| entry.path.join(".git"));
+            gitdir.join("rebase-merge")
+        };
         if rebase_dir.exists() {
             // Collect conflicted files before aborting.
             let conflicted = Command::new("git")
