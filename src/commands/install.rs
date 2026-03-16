@@ -2,13 +2,13 @@ use anyhow::{bail, Result};
 use std::path::PathBuf;
 
 const ZSH_SNIPPET: &str = r#"
-# cow shell integration (v2)
+# cow shell integration (v3)
 autoload -Uz compinit && compinit
 function cowcd() { cd "$(cow cd "$1")"; }
 function _cow_pasture_names() { cow list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null; }
 function _cow() {
-  local subcmds=(create list status diff extract remove sync cd run materialise fetch-from recreate migrate install mcp)
-  local name_cmds=(status diff extract remove cd run materialise fetch-from recreate)
+  local subcmds=(create list status diff extract remove sync cd path run materialise fetch-from recreate migrate install mcp gc stats clean)
+  local name_cmds=(status diff extract remove cd path run materialise fetch-from recreate clean)
   if (( CURRENT == 2 )); then
     compadd -- $subcmds
   elif (( CURRENT == 3 )) && [[ ${words[2]} == (${(j:|:)name_cmds}) ]]; then
@@ -21,12 +21,12 @@ compdef _cowcd cowcd
 "#;
 
 const BASH_SNIPPET: &str = r#"
-# cow shell integration (v2)
+# cow shell integration (v3)
 function cowcd() { cd "$(cow cd "$1")"; }
 _cow_pasture_names() { cow list --json 2>/dev/null | jq -r '.[].name' 2>/dev/null; }
 function _cow() {
-  local subcmds="create list status diff extract remove sync cd run materialise fetch-from recreate migrate install mcp"
-  local name_cmds="status diff extract remove cd run materialise fetch-from recreate"
+  local subcmds="create list status diff extract remove sync cd path run materialise fetch-from recreate migrate install mcp gc stats clean"
+  local name_cmds="status diff extract remove cd path run materialise fetch-from recreate clean"
   if (( COMP_CWORD == 1 )); then
     COMPREPLY=($(compgen -W "$subcmds" -- "${COMP_WORDS[1]}"))
   elif (( COMP_CWORD == 2 )) && [[ " $name_cmds " == *" ${COMP_WORDS[1]} "* ]]; then
@@ -39,7 +39,7 @@ complete -F _cowcd cowcd
 "#;
 
 // Marker unique to v2 snippet — used to detect whether the current version is installed.
-const INSTALLED_MARKER: &str = "# cow shell integration (v2)";
+const INSTALLED_MARKER: &str = "# cow shell integration (v3)";
 
 pub fn run() -> Result<()> {
     let shell = std::env::var("SHELL").unwrap_or_default();
