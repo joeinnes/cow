@@ -249,4 +249,39 @@ mod tests {
         // Should be a date like "2026-02-20"
         assert!(result.contains('-'), "expected date format, got: {}", result);
     }
+
+    #[test]
+    fn truncate_name_multibyte_does_not_panic() {
+        // "café/feature-branch": c(1) a(1) f(1) é(2) /(1) f(1) ...
+        // Byte offsets: c=0 a=1 f=2 é=3..4 /=5 f=6 ...
+        // With max=7, cut = 7 - 3 = 4, which is byte 4 — the second
+        // byte of é (0xA9), not a char boundary → panic.
+        let result = truncate_name("café/feature-branch", 7);
+        assert!(result.is_char_boundary(0), "result must be valid UTF-8");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn truncate_name_emoji_does_not_panic() {
+        // "🐄project/branch": 🐄 is 4 bytes (0..3), p=4 r=5 o=6 ...
+        // With max=6, cut = 6 - 3 = 3, which is byte 3 — inside the
+        // cow emoji (its last byte), not a char boundary → panic.
+        let result = truncate_name("🐄project/branch", 6);
+        assert!(result.is_char_boundary(0), "result must be valid UTF-8");
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn truncate_name_multibyte_truncates_cleanly() {
+        // "café/feature": c=0 a=1 f=2 é=3..4 /=5 f=6 e=7 ...
+        // Total byte len = 13 (12 chars but é is 2 bytes).
+        // With max=8, cut = 8 - 3 = 5, byte 5 is '/'. That's valid.
+        // With max=7, cut = 7 - 3 = 4, byte 4 is inside é → panic.
+        let result = truncate_name("café/feature", 7);
+        assert!(result.ends_with('…'), "should end with ellipsis, got: {result}");
+        // Result must be valid UTF-8 (if we got here without panic, it is)
+        // and its char count should be reasonable.
+        let char_count = result.chars().count();
+        assert!(char_count >= 2, "should have at least one char plus ellipsis, got: {result}");
+    }
 }

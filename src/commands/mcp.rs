@@ -429,3 +429,31 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
     }
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    /// Documents the bug: `split_whitespace` destroys shell quoting semantics.
+    ///
+    /// The `cow_run` tool handler splits the command string by whitespace,
+    /// so `echo "hello world"` becomes `["echo", "\"hello", "world\""]`
+    /// instead of the correct `["echo", "hello world"]`.
+    ///
+    /// This test asserts the *correct* behaviour and therefore fails until
+    /// the handler is fixed to use a shell-aware tokeniser (e.g. `shell-words`).
+    #[test]
+    fn cow_run_command_with_quotes_should_preserve_groups() {
+        let command = r#"echo "hello world""#;
+
+        // This is what the handler currently does (line 411):
+        let tokens: Vec<&str> = command.split_whitespace().collect();
+
+        // Correct behaviour: quoted group kept together, quotes stripped.
+        assert_eq!(
+            tokens,
+            vec!["echo", "hello world"],
+            "split_whitespace breaks quoted arguments — \
+             it produces {:?} instead of preserving the quoted group",
+            tokens,
+        );
+    }
+}

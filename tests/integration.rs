@@ -1507,6 +1507,86 @@ mod tests {
         assert!(!rebase_dir.exists(), "rebase-merge dir should be absent after auto-abort");
     }
 
+    #[test]
+    fn sync_worktree_rebase_conflict_auto_aborts() {
+        // Same as sync_conflict_aborts_and_reports but with a --worktree pasture.
+        // For worktrees, .git is a file, not a directory, so rebase-merge lives
+        // inside the real gitdir (e.g. .git/worktrees/<name>/rebase-merge).
+        // The current code checks .git/rebase-merge which never exists for worktrees,
+        // so conflict detection silently fails.
+        let env = Env::new();
+        let source = make_git_repo(); // has hello.txt with content "hello"
+
+        env.cow()
+            .args([
+                "create",
+                "wt-conflict",
+                "--source",
+                source.path().to_str().unwrap(),
+                "--worktree",
+            ])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "wt-conflict");
+
+        // Worktree pastures may have .cow-context as untracked (exclude path
+        // resolution bug for worktrees). Work around it so the dirty check in
+        // sync doesn't bail before we reach the rebase.
+        if pasture.join(".cow-context").exists() {
+            git(&pasture, &["add", ".cow-context"]);
+            git(&pasture, &["commit", "-m", "add cow-context"]);
+        }
+
+        // Pasture modifies hello.txt and commits.
+        std::fs::write(pasture.join("hello.txt"), "worktree version").unwrap();
+        git(&pasture, &["add", "hello.txt"]);
+        git(&pasture, &["commit", "-m", "worktree change"]);
+
+        // Source also modifies hello.txt and commits (different content → conflict on rebase).
+        std::fs::write(source.path().join("hello.txt"), "source version").unwrap();
+        git(source.path(), &["add", "hello.txt"]);
+        git(source.path(), &["commit", "-m", "source change"]);
+
+        let sync_assert = env.cow()
+            .args([
+                "sync",
+                &scoped(&source, "wt-conflict"),
+                "--source-branch",
+                "main",
+            ])
+            .assert()
+            .failure();
+
+        // The error message must mention "conflict" AND "aborted" — proving cow
+        // detected the conflict via the real gitdir (not the .git file) and ran
+        // `git rebase --abort`. Without the fix, the code falls through to a
+        // generic "Failed to rebase" message that lacks "aborted".
+        sync_assert
+            .stderr(predicate::str::contains("conflict"))
+            .stderr(predicate::str::contains("aborted"));
+
+        // Pasture must NOT be left in a rebase state.
+        // Resolve the real gitdir (for worktrees, .git is a file pointing there).
+        let gitdir_output = std::process::Command::new("git")
+            .args(["rev-parse", "--git-dir"])
+            .current_dir(&pasture)
+            .env("HOME", &env.home)
+            .output()
+            .expect("git rev-parse --git-dir should work");
+        let gitdir_raw = String::from_utf8_lossy(&gitdir_output.stdout).trim().to_string();
+        let real_gitdir = if std::path::Path::new(&gitdir_raw).is_absolute() {
+            PathBuf::from(&gitdir_raw)
+        } else {
+            pasture.join(&gitdir_raw)
+        };
+        let rebase_dir = real_gitdir.join("rebase-merge");
+        assert!(
+            !rebase_dir.exists(),
+            "rebase-merge dir should be absent in real gitdir after auto-abort"
+        );
+    }
+
     // ─── cd ────────────────────────────────────────────────────────────────────
 
     #[test]
