@@ -4853,6 +4853,43 @@ mod tests {
     }
 
     #[test]
+    fn gc_uses_current_branch_not_stored() {
+        // Bug: gc checks the stored branch (from creation time) instead of the
+        // actual current branch in the pasture.  If the user switches to an
+        // unpushed branch after creation, gc should NOT list it as a candidate.
+        let env = Env::new();
+        let (source, _bare) = make_git_repo_with_remote();
+
+        let src = source.path().to_str().unwrap();
+
+        // Create pasture — this auto-creates and checks out branch "gc-switch".
+        env.cow()
+            .args(["create", "gc-switch", "--source", src])
+            .assert()
+            .success();
+
+        let pasture = ws_path(&env.home, &source, "gc-switch");
+
+        // Push the pasture's branch to origin so gc would consider it "pushed".
+        git(&pasture, &["push", "--set-upstream", "origin", "gc-switch"]);
+
+        // Fetch in the source repo so its remote-tracking refs see origin/gc-switch.
+        git(source.path(), &["fetch", "origin"]);
+
+        // Now switch to a brand-new branch that is NOT on origin.
+        git(&pasture, &["checkout", "-b", "unpushed-work"]);
+
+        // gc --dry-run should NOT list this pasture because its CURRENT branch
+        // ("unpushed-work") is not on origin — even though the STORED branch
+        // ("gc-switch") is.
+        env.cow()
+            .args(["gc", "--dry-run"])
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("No pastures with branches pushed to origin"));
+    }
+
+    #[test]
     fn fetch_from_jj_destination_fails() {
         // Exercises fetch_from.rs line 36: bail when destination pasture is not git.
         let env = Env::new();
