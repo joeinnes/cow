@@ -277,6 +277,30 @@ fn tools_list() -> Value {
     ])
 }
 
+fn split_shell_words(s: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut in_double = false;
+    let mut in_single = false;
+
+    for c in s.chars() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            ' ' | '\t' if !in_double && !in_single => {
+                if !current.is_empty() {
+                    words.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
 fn call_tool(name: &str, args: &Value) -> Result<String> {
     let exe = std::env::current_exe()?;
 
@@ -408,7 +432,7 @@ fn call_tool(name: &str, args: &Value) -> Result<String> {
             }
             if let Some(command) = args["command"].as_str() {
                 // Split the command string into tokens for the trailing var-arg.
-                for token in command.split_whitespace() {
+                for token in split_shell_words(command) {
                     cmd.arg(token);
                 }
             }
@@ -444,8 +468,8 @@ mod tests {
     fn cow_run_command_with_quotes_should_preserve_groups() {
         let command = r#"echo "hello world""#;
 
-        // This is what the handler currently does (line 411):
-        let tokens: Vec<&str> = command.split_whitespace().collect();
+        // This is what the handler currently does:
+        let tokens = super::split_shell_words(command);
 
         // Correct behaviour: quoted group kept together, quotes stripped.
         assert_eq!(
