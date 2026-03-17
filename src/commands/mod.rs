@@ -1,4 +1,5 @@
 mod cd;
+mod clean;
 mod create;
 mod gc;
 mod run_cmd;
@@ -39,5 +40,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Mcp => mcp::run(),
         Commands::Stats => stats::run(),
         Commands::Gc(args) => gc::run(args),
+        Commands::Clean(args) => clean::run(args),
     }
 }

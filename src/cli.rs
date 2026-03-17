@@ -50,6 +50,8 @@ pub enum Commands {
     Stats,
     /// Remove pastures whose branches have been pushed or merged to origin
     Gc(GcArgs),
+    /// Remove build artifact directories (target/, .build/, etc.) from pastures
+    Clean(CleanArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -276,4 +278,14 @@ pub struct FetchFromArgs {
     /// Allow fetching from a pasture with a different source repo
     #[arg(long)]
     pub force: bool,
+}
+
+#[derive(clap::Args, Debug)]
+pub struct CleanArgs {
+    /// Name of the pasture to clean (cleans all pastures if omitted)
+    pub name: Option<String>,
+
+    /// Show what would be removed without removing anything
+    #[arg(long)]
+    pub dry_run: bool,
 }
