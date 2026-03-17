@@ -148,7 +148,10 @@ fn offer_push(name: &str, path: &Path) -> Result<bool> {
     );
     match Confirm::new().with_prompt(&prompt).default(false).interact_opt() {
         Ok(Some(true)) => {
-            let branch = vcs::git_current_branch(path).unwrap_or_default();
+            // Caller guards with git_has_unpushed_commits, which requires
+            // an upstream — so we're never on a detached HEAD here.
+            let branch = vcs::git_current_branch(path)
+                .expect("has upstream implies a branch exists");
             let status = std::process::Command::new("git")
                 .args(["push", "--set-upstream", "origin", &branch])
                 .current_dir(path)
