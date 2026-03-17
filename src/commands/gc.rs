@@ -34,7 +34,9 @@ pub fn run(args: GcArgs) -> Result<()> {
     let candidates: Vec<PastureEntry> = state.pastures.iter()
         .filter(|w| w.vcs == Vcs::Git)
         .filter(|w| {
-            let Some(branch) = &w.branch else { return false; };
+            let branch = vcs::git_current_branch(&w.path)
+                .or_else(|| w.branch.clone());
+            let Some(branch) = branch.as_deref() else { return false; };
             if !branch_on_origin(&w.source, branch) { return false; }
             if args.merged { branch_merged(&w.source, branch) } else { true }
         })
