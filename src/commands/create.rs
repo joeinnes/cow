@@ -150,11 +150,35 @@ pub fn run(args: CreateArgs) -> Result<()> {
         return run_worktree(&source, &dest, &name, branch_arg.as_deref(), args.print_path, &mut state);
     }
 
+    // Turbopack doesn't follow symlinks correctly in monorepos — force a full clone.
+    let is_turbopack_monorepo = source.join("turbo.json").exists();
+    if is_turbopack_monorepo && !args.no_symlink && !args.print_path {
+        println!("ℹ  Turbopack monorepo detected — skipping symlinks for full compatibility.");
+        println!("   Full clones are a little slower than symlinked ones.");
+        println!();
+    }
+
+    // Warn when build artifact dirs are present in the source — they will be skipped.
+    // Cloning them creates an orphaned CoW copy whenever the source rebuilds or cleans.
+    #[cfg(target_os = "macos")]
+    if !args.print_path {
+        let skipped: Vec<&str> = BUILD_ARTIFACT_DIRS
+            .iter()
+            .filter(|&&d| source.join(d).is_dir())
+            .copied()
+            .collect();
+        if !skipped.is_empty() {
+            let dirs = skipped.iter().map(|d| format!("{}/", d)).collect::<Vec<_>>().join(", ");
+            println!("ℹ  Skipping build artifacts ({}) — rebuild in the pasture if needed.", dirs);
+            println!();
+        }
+    }
+
     // Detect large dirs to symlink (macOS + git only; skip when --no-symlink).
     // Split into dep dirs (per-package symlinks) and plain large dirs (whole-dir symlinks).
     #[cfg(target_os = "macos")]
     let (dep_candidates, whole_candidates): (Vec<(PathBuf, usize)>, Vec<(PathBuf, usize)>) = {
-        if !args.no_symlink && detected_vcs == Vcs::Git {
+        if !args.no_symlink && !is_turbopack_monorepo && detected_vcs == Vcs::Git {
             let threshold = read_symlink_threshold(&source).unwrap_or(10_000);
             let all = find_symlink_candidates(&source, threshold)?;
             all.into_iter().partition(|(p, _)| is_dep_dir(p))
@@ -187,7 +211,8 @@ pub fn run(args: CreateArgs) -> Result<()> {
                 format_count(*count)
             );
         }
-        println!("   To fully clone: cow materialise {}", name);
+        println!("   Some bundlers (e.g. Turbopack) may fail to resolve symlinked dependencies.");
+        println!("   If this affects you, run: cow materialise {}", name);
         println!();
     }
 
