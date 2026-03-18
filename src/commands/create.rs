@@ -16,6 +16,12 @@ const DEP_DIR_NAMES: &[&str] = &[
     "node_modules", "vendor", ".venv", "venv", "env", "Pods", "bower_components",
 ];
 
+/// Build artifact directories that are never cloned into pastures.
+/// These are always in .gitignore, contain no source, and the source's copy
+/// becomes an orphaned CoW clone whenever the source rebuilds or cleans.
+/// Pastures build their own when needed.
+const BUILD_ARTIFACT_DIRS: &[&str] = &["target", ".build", "DerivedData", ".turbo"];
+
 pub fn run(args: CreateArgs) -> Result<()> {
     // Resolve source path
     let source = match args.source {
@@ -698,7 +704,12 @@ fn cow_clone(
         }
         if whole_candidates.is_empty() && dep_candidates.is_empty() {
             // Fast path: single clonefile(2) syscall, O(1) on APFS.
-            return clonefile_dir(source, dest);
+            // Skip if any build artifact dirs exist — they must be excluded, which
+            // requires traversal via selective_clone even with empty candidate lists.
+            let has_artifacts = BUILD_ARTIFACT_DIRS.iter().any(|d| source.join(d).is_dir());
+            if !has_artifacts {
+                return clonefile_dir(source, dest);
+            }
         }
         // Selective clone: per-package for dep dirs, whole-dir for others, clonefile the rest.
         let whole_paths: Vec<PathBuf> = whole_candidates.iter().map(|(p, _)| p.clone()).collect();
@@ -844,8 +855,17 @@ fn selective_clone(
         .with_context(|| format!("Failed to read directory: {}", source.display()))?
     {
         let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_str().unwrap_or("");
+
+        // Never clone build artifact directories — they are always reproducible
+        // and become orphaned CoW copies when the source rebuilds or cleans.
+        if entry.file_type()?.is_dir() && BUILD_ARTIFACT_DIRS.contains(&name_str) {
+            continue;
+        }
+
         let src_path = entry.path();
-        let dst_path = dest.join(entry.file_name());
+        let dst_path = dest.join(&name);
         let rel = src_path
             .strip_prefix(orig_source)
             .expect("source is always under orig_source");
