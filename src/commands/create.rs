@@ -952,6 +952,14 @@ fn selective_clone(
         {
             // Has a candidate descendant — recurse.
             selective_clone(orig_source, &src_path, &dst_path, whole_candidates, dep_candidates)?;
+        } else if entry.file_type()?.is_symlink() {
+            // Safety net: never let clonefile follow a symlink it can't resolve
+            // (e.g. pnpm relative symlinks inside node_modules/ when .pnpm/
+            // hasn't been materialised yet). Copy the symlink verbatim instead.
+            let target = std::fs::read_link(&src_path)
+                .with_context(|| format!("Failed to read symlink '{}'", src_path.display()))?;
+            std::os::unix::fs::symlink(&target, &dst_path)
+                .with_context(|| format!("Failed to recreate symlink '{}'", dst_path.display()))?;
         } else {
             clonefile_dir(&src_path, &dst_path)
                 .with_context(|| format!("Failed to clone '{}'", src_path.display()))?;
