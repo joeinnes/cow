@@ -253,6 +253,15 @@ pub fn run(args: CreateArgs) -> Result<()> {
         return setup_result;
     }
 
+    // Install post-rewrite hook for git clones (not worktrees) so that local
+    // tracking branches (e.g. main) are fast-forwarded after a rebase, preventing
+    // stale-ref diff confusion.
+    if detected_vcs == Vcs::Git && !args.worktree {
+        if let Err(e) = install_post_rewrite_hook(&dest) {
+            eprintln!("cow: warning: could not install post-rewrite hook: {:#}", e);
+        }
+    }
+
     if args.print_path {
         println!("{}", dest.display());
     } else {
@@ -1017,6 +1026,15 @@ fn setup_git(workspace: &Path, branch: Option<&str>) -> Result<Option<String>> {
         let _ = std::fs::remove_dir_all(&worktrees_dir);
     }
 
+    // Prevent git from auto-creating local branches that shadow remote tracking
+    // refs. CoW clones copy .git/refs/remotes/ from the source, so a later
+    // `git rebase origin/main` would otherwise create a local branch called
+    // "origin/main" (via checkout.guess), permanently shadowing the remote ref.
+    let _ = Command::new("git")
+        .args(["config", "--local", "checkout.guess", "false"])
+        .current_dir(workspace)
+        .status();
+
     let Some(branch) = branch else {
         return Ok(vcs::git_current_branch(workspace));
     };
@@ -1298,4 +1316,60 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+}
+
+/// Install a post-rewrite git hook in the pasture that fast-forwards local
+/// tracking branches after a rebase, preventing stale-ref diff confusion.
+///
+/// When a cow pasture is created, local branches (e.g. `main`) are frozen at
+/// clone time. After `git rebase origin/main`, local `main` is still stale, so
+/// diff tools comparing against it show hundreds of spurious commits. The hook
+/// fixes this by fast-forwarding any local branch that is behind its remote
+/// counterpart after every rebase.
+fn install_post_rewrite_hook(dest: &Path) -> Result<()> {
+    let git_dir = dest.join(".git");
+    // Worktrees have a `.git` file, not a directory — skip them.
+    if !git_dir.is_dir() {
+        return Ok(());
+    }
+
+    let hooks_dir = git_dir.join("hooks");
+    std::fs::create_dir_all(&hooks_dir)
+        .context("Failed to create .git/hooks directory")?;
+
+    let hook_path = hooks_dir.join("post-rewrite");
+
+    // Don't overwrite a pre-existing hook the user may have written.
+    if hook_path.exists() {
+        return Ok(());
+    }
+
+    let script = "\
+#!/bin/sh
+# Installed by cow. Fast-forwards local branches that are behind their remote
+# counterparts after a rebase, preventing stale-ref diff confusion.
+case \"$1\" in
+  rebase)
+    git for-each-ref --format='%(refname:short)' 'refs/heads/' | while IFS= read -r branch; do
+      remote_ref=\"refs/remotes/origin/$branch\"
+      if git show-ref --verify --quiet \"$remote_ref\" && \
+         git merge-base --is-ancestor \"refs/heads/$branch\" \"$remote_ref\" 2>/dev/null; then
+        git update-ref \"refs/heads/$branch\" \"$remote_ref\"
+      fi
+    done
+    ;;
+esac
+";
+
+    std::fs::write(&hook_path, script)
+        .context("Failed to write post-rewrite hook")?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755))
+            .context("Failed to make post-rewrite hook executable")?;
+    }
+
+    Ok(())
 }
