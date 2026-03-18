@@ -814,6 +814,17 @@ fn collect_candidates(
                     if let Ok(rel) = path.strip_prefix(root) {
                         candidates.push((rel.to_path_buf(), sub));
                     }
+                } else if candidates.len() != before && sub > threshold {
+                    // A deeper candidate was found, but dep dirs (node_modules,
+                    // vendor, etc.) must always be candidates themselves so that
+                    // per-package symlink logic runs at the right level. Without
+                    // this, selective_clone recurses into node_modules/ and hits
+                    // pnpm relative symlinks with clonefile, causing ENOENT.
+                    if let Ok(rel) = path.strip_prefix(root) {
+                        if is_dep_dir(&rel) {
+                            candidates.push((rel.to_path_buf(), sub));
+                        }
+                    }
                 }
             }
         }
