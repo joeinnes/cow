@@ -47,7 +47,10 @@ pub fn run() -> Result<()> {
         let npm_clone  = total_bytes.saturating_sub(target_bytes) as i64;
         let pnpm_clone = total_bytes.saturating_sub(target_bytes).saturating_sub(nm_bytes) as i64;
 
-        let delta: u64 = pastures.iter().map(|w| pasture_delta_bytes(&w.path)).sum();
+        // Use `du -sk` per pasture. On APFS, du reports only the blocks uniquely
+        // owned by each inode — CoW-shared blocks (unmodified clonefiles) cost
+        // near-zero, and symlinked dirs (node_modules etc.) are not followed.
+        let delta: u64 = pastures.iter().map(|w| du_bytes(&w.path)).sum();
 
         let npm_saved  = npm_clone  * count as i64 - delta as i64;
         let pnpm_saved = pnpm_clone * count as i64 - delta as i64;
@@ -141,33 +144,6 @@ fn du_bytes(path: &Path) -> u64 {
         * 1024
 }
 
-fn pasture_delta_bytes(path: &Path) -> u64 {
-    if !path.exists() {
-        return 0;
-    }
-    let mut files: Vec<String> = Vec::new();
-
-    if let Ok(out) = Command::new("git")
-        .args(["-C", path.to_str().unwrap_or(""), "diff", "HEAD", "--name-only"])
-        .stderr(std::process::Stdio::null())
-        .output()
-    {
-        files.extend(String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned));
-    }
-    if let Ok(out) = Command::new("git")
-        .args(["-C", path.to_str().unwrap_or(""), "ls-files", "--others", "--exclude-standard"])
-        .stderr(std::process::Stdio::null())
-        .output()
-    {
-        files.extend(String::from_utf8_lossy(&out.stdout).lines().map(str::to_owned));
-    }
-
-    files.iter()
-        .filter(|f| !f.is_empty())
-        .filter_map(|f| std::fs::metadata(path.join(f)).ok())
-        .map(|m| m.len())
-        .sum()
-}
 
 fn fmt(bytes: u64) -> String {
     const GB: u64 = 1024 * 1024 * 1024;
