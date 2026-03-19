@@ -54,7 +54,7 @@ Large dependency directories (`node_modules`, `vendor`, `.venv`, `Pods`, etc.) a
 - **Dep dirs** (e.g. `node_modules`) — each top-level package entry is symlinked individually, so existing packages are instantly available and new installs write locally to the pasture.
 - **Other large dirs** (e.g. `fixtures/`) — the whole directory is symlinked to the source.
 
-Run `cow materialise <name>` to replace all symlinks with real clonefiles for a fully independent pasture.
+Some bundlers (e.g. Turbopack) cannot resolve symlinked dependencies and will fail with missing-module errors. Run `cow materialise <name>` to replace all symlinks with real clonefiles for a fully independent pasture.
 
 | Option | Description |
 |--------|-------------|
@@ -146,6 +146,52 @@ function cowcd() { cd "$(cow cd "$1")"; }
 # Then:
 cowcd feature-x
 ```
+
+Run `cow install` to set this up automatically.
+
+### `cow path <NAME>`
+
+Alias for `cow cd`. Prints the absolute path of a pasture. Useful in scripting contexts where "print path" is clearer than "cd".
+
+### `cow install`
+
+Install the `cowcd` shell function and tab completion into your shell config (`~/.zshrc` for zsh, `~/.bashrc` for bash). Idempotent — safe to run multiple times. Tab completion requires `jq`.
+
+### `cow recreate [OPTIONS] <NAME>`
+
+Remove a pasture and immediately re-create it from the same source. Useful for getting a clean slate without having to remember the original source path.
+
+| Option | Description |
+|--------|-------------|
+| `--branch <BRANCH>` | Override the branch checked out in the fresh clone |
+| `--no-branch` | Do not switch or create a branch |
+
+### `cow gc [OPTIONS]`
+
+Remove pastures whose branches have been pushed or merged to origin. Uses cached remote-tracking refs by default — no network call needed.
+
+| Option | Description |
+|--------|-------------|
+| `--merged` | Only remove pastures whose branch is merged into the default branch |
+| `--fetch` | Fetch from origin first to update remote-tracking refs |
+| `--dry-run` | Show what would be removed without removing anything |
+| `-y, --yes` | Skip confirmation prompts |
+| `--force` | Skip dirty-state warnings and remove immediately |
+
+```sh
+# Preview stale pastures
+cow gc --dry-run
+
+# Remove all pastures whose branches are on origin (asks per pasture)
+cow gc
+
+# Remove all merged pastures without prompting
+cow gc --merged --yes --fetch
+```
+
+### `cow stats`
+
+Show estimated disk savings across all pastures. Groups pastures by source repository and compares the source's disk footprint against the cumulative delta of its pastures — the difference is what cow saved versus a traditional full clone.
 
 ### `cow sync [SOURCE_BRANCH]`
 
