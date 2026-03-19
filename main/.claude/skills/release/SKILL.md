@@ -42,7 +42,29 @@ cargo build --release --target aarch64-apple-darwin 2>&1 | tail -3
 ```
 (This is the first arch build — keep the output for step 6.)
 
-### 5. Commit
+### 5. Update real-world stats on homepage
+
+Run `cow stats` to get current numbers:
+
+```sh
+cow stats
+```
+
+From the **Total** row in the output, extract:
+- Pasture count (Pastures column)
+- Disk delta (Delta column)
+- npm savings (Saved (npm) column — number only, strip leading `~`)
+- pnpm savings (Saved (pnpm) column — number only, strip leading `~`)
+
+Edit `docs/index.html` — find the `proof-strip` div in the hero section and update:
+- The `proof-num` span inside the "active pastures" stat
+- The `proof-num` span inside the "total disk delta" stat
+- The `proof-pm-num` span for "npm / yarn"
+- The `proof-pm-num` span for "pnpm / bun"
+
+Keep the `~` prefix on the savings figures. The caption line ("the developer's own experience…") does not need to change.
+
+### 6. Commit
 
 Stage only the release files — never commit `.tickets/` or other unrelated untracked files:
 
@@ -53,12 +75,12 @@ git status --short  # confirm only expected files are staged
 
 Write a concise commit message: `Bump to v{NEW_VERSION}: <one-line summary>` followed by a bullet-point body drawn from the changelog entry.
 
-Commit and push in the same shell to keep the SSH agent available:
+Commit and push:
 ```sh
-eval $(ssh-agent -s) && ssh-add --apple-load-keychain 2>/dev/null && git commit -m "..." && git push origin main
+git commit -m "..." && git push origin main
 ```
 
-### 6. Build universal binary
+### 7. Build universal binary
 
 Build both architectures (the arm64 build may already be done from step 4):
 
@@ -86,7 +108,7 @@ cd /tmp && tar -czf cow-{NEW_VERSION}.tar.gz cow-universal cow.1
 shasum -a 256 cow-{NEW_VERSION}.tar.gz
 ```
 
-### 7. Extract release notes from docs/changelog.html
+### 8. Extract release notes from docs/changelog.html
 
 Read the `v{NEW_VERSION}` entry from `docs/changelog.html` and convert it to markdown for the GitHub release body. The structure to follow:
 
@@ -95,7 +117,7 @@ Read the `v{NEW_VERSION}` entry from `docs/changelog.html` and convert it to mar
 - Each `<li>` becomes a bullet, with the `.tag` span rendered as a bold label e.g. `**perf**`
 - Strip all HTML tags from the text
 
-### 8. Create GitHub release
+### 9. Create GitHub release
 
 ```sh
 gh release create v{NEW_VERSION} /tmp/cow-{NEW_VERSION}.tar.gz \
@@ -104,7 +126,7 @@ gh release create v{NEW_VERSION} /tmp/cow-{NEW_VERSION}.tar.gz \
   --notes "<markdown release notes from step 7>"
 ```
 
-### 9. Update Homebrew tap
+### 10. Update Homebrew tap
 
 Get the current formula file SHA:
 ```sh
