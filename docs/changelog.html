@@ -342,6 +342,76 @@
     <!-- ─── Entries ──────────────────────────────────────── -->
     <div class="changelog">
 
+      <!-- v0.1.10 -->
+      <div class="release">
+        <div class="release-meta">
+          <span class="release-version">v0.1.10</span>
+          <span class="release-date">2026-03-19</span>
+          <span class="release-tag feature">new</span>
+        </div>
+        <div class="release-body">
+          <h2>Build artifact skipping, cow clean, and stale-ref fixes.</h2>
+          <p class="lead">
+            Pastures now skip build artifacts (target/, .build/, etc.) during cloning,
+            a new <code>cow clean</code> command removes them from existing pastures,
+            and two fixes prevent confusing diffs after rebasing.
+          </p>
+
+          <div class="change-group">
+            <span class="change-group-label">New</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag feature">new</span>
+                <strong>cow clean</strong> — remove build artifact directories (target/, .build/,
+                DerivedData/, .turbo/) from pastures. Supports <code>--dry-run</code> and
+                per-pasture targeting.
+              </li>
+              <li>
+                <span class="tag feature">new</span>
+                <strong>Build artifact skipping</strong> — <code>cow create</code> now skips
+                build artifact directories automatically. They are always reproducible and become
+                orphaned CoW copies when the source rebuilds.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Bug fixes</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag fix">fix</span>
+                <strong>Stale-ref diff confusion</strong> — pastures now set
+                <code>checkout.guess=false</code> to prevent <code>git rebase origin/main</code>
+                from creating a local branch that shadows the remote ref. A post-rewrite hook
+                fast-forwards local tracking branches after every rebase.
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                <strong>Symlink safety</strong> — <code>selective_clone</code> now copies symlinks
+                verbatim instead of letting <code>clonefile(2)</code> follow them, fixing ENOENT
+                errors with pnpm relative symlinks.
+              </li>
+              <li>
+                <span class="tag fix">fix</span>
+                <strong>Dep dir candidates</strong> — dep dirs (node_modules, vendor, etc.) are
+                now always added as symlink candidates even when a deeper candidate exists inside them.
+              </li>
+            </ul>
+          </div>
+
+          <div class="change-group">
+            <span class="change-group-label">Improvements</span>
+            <ul class="change-list">
+              <li>
+                <span class="tag perf">perf</span>
+                <strong>cow stats</strong> — switched from git-diff-based delta measurement to
+                <code>du(1)</code>, which correctly reports only uniquely-owned blocks on APFS.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <!-- v0.1.9 -->
       <div class="release">
         <div class="release-meta">
